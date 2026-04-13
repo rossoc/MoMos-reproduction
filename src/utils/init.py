@@ -5,6 +5,57 @@ import os
 from omegaconf import OmegaConf
 
 
+def generate_unique_run_name(base_dir, slug):
+    """Generate a unique run name by prepending an incrementing number to a slug.
+
+    Scans existing directories in ``base_dir`` to find the next available run number.
+
+    Args:
+        base_dir: Base directory containing previous run directories.
+        slug: Coolname slug string (e.g. ``"foggy-cat"``).
+
+    Returns:
+        Unique run name string (e.g. ``"3_foggy-cat"``).
+    """
+    if not os.path.isdir(base_dir):
+        return f"0_{slug}"
+
+    existing_runs = [
+        d for d in os.listdir(base_dir)
+        if os.path.isdir(os.path.join(base_dir, d))
+    ]
+    numbers = []
+    for d in existing_runs:
+        parts = d.split("_", 1)
+        if parts[0].isdigit():
+            numbers.append(int(parts[0]))
+
+    run_number = max(numbers) + 1 if numbers else 0
+    return f"{run_number}_{slug}"
+
+
+def setup_checkpoint_dir(log_dir, dataset_name, prefix, run_name):
+    """Create checkpoint directory structure and return paths.
+
+    Args:
+        log_dir: Base logging directory.
+        dataset_name: Name of the dataset (used in default directory name).
+        prefix: Optional prefix for the run directory. If None, defaults to ``"{dataset_name}_mlp"``.
+        run_name: Coolname slug for the run (e.g. ``"foggy-cat"``).
+
+    Returns:
+        Tuple of ``(checkpoint_dir, unique_run_name, init_ckpt_path)``.
+    """
+    base_dir = prefix or f"{dataset_name}_mlp"
+    run_base_dir = os.path.join(log_dir, base_dir)
+    os.makedirs(run_base_dir, exist_ok=True)
+    unique_run_name = generate_unique_run_name(run_base_dir, run_name)
+    checkpoint_dir = os.path.join(run_base_dir, unique_run_name)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    init_ckpt_path = os.path.join(checkpoint_dir, "init.ckpt")
+    return checkpoint_dir, unique_run_name, init_ckpt_path
+
+
 def normalize_pct(value, field_name):
     """Normalize split value to a fraction in ``(0, 1]``.
 

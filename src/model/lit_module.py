@@ -91,13 +91,13 @@ class LitMLP(L.LightningModule):
         """Configure AdamW optimizer with cosine LR scheduler."""
         optimizer = torch.optim.AdamW(
             self.parameters(),
-            lr=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay,
+            lr=self.hparams.learning_rate,  # type: ignore
+            weight_decay=self.hparams.weight_decay,  # type: ignore
         )
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
-            T_max=self.hparams.epochs,
+            T_max=self.hparams.epochs,  # type: ignore
         )
 
         return {

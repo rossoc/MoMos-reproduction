@@ -15,7 +15,7 @@ from coolname import generate_slug
 
 from data import ImageDataModule
 from model.lit_module import LitMLP
-from utils.init import resolve_runtime
+from utils.init import resolve_runtime, setup_checkpoint_dir
 
 
 @hydra.main(config_path="configs", config_name="config", version_base="1.3")
@@ -42,9 +42,12 @@ def main(cfg: DictConfig):
     input_dim = cfg.dataset.in_channels * cfg.dataset.img_size * cfg.dataset.img_size
 
     # Setup checkpoint directory
-    checkpoint_dir = os.path.join(cfg.log_dir, f"{cfg.prefix or f'{cfg.dataset.name}_mlp'}_{run_name}")
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    init_ckpt_path = os.path.join(checkpoint_dir, "init.ckpt")
+    checkpoint_dir, unique_run_name, init_ckpt_path = setup_checkpoint_dir(
+        log_dir=cfg.log_dir,
+        dataset_name=cfg.dataset.name,
+        prefix=cfg.prefix,
+        run_name=run_name,
+    )
 
     # Create LightningModule
     model = LitMLP(
@@ -88,17 +91,17 @@ def main(cfg: DictConfig):
     # When disabled, use False to prevent Lightning from creating default lightning_logs/ directory
     if cfg.get("wandb", {}).get("enabled", False):
         wandb_cfg = cfg.wandb
-        run_name = wandb_cfg.get("name") or run_name
+        wandb_run_name = wandb_cfg.get("name") or unique_run_name
         logger = WandbLogger(
             project=wandb_cfg.get("project", "momos-reproduction"),
             entity=wandb_cfg.get("entity", None),
-            name=run_name,
+            name=wandb_run_name,
             tags=wandb_cfg.get("tags", []),
             log_model=wandb_cfg.get("log_model", False),
             save_dir=cfg.log_dir,
         )
         # Log full Hydra config to W&B
-        logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+        logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))  # type: ignore
     else:
         # Explicitly disable logging to prevent lightning_logs/ directory creation
         logger = False
