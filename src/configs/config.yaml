@@ -1,0 +1,22 @@
+defaults:
+  - dataset: cifar10
+  - model: mlp
+  - _self_
+
+# Training overrides
+epochs: 200
+patience: null
+seed: 42
+
+# Data
+data_dir: ./data
+batch_size: 128
+num_workers: null
+
+# Trainer
+accelerator: auto
+devices: 1
+
+# Logging
+log_dir: ./logs
+prefix: ""

@@ -1,0 +1,6 @@
+name: mnist
+num_classes: 10
+in_channels: 1
+img_size: 28
+val_pct: null
+test_pct: 1.0
