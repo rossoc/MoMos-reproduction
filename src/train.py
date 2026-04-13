@@ -22,6 +22,7 @@ from utils.init import resolve_runtime
 def main(cfg: DictConfig):
     """Run training with PyTorch Lightning and Hydra config management."""
     # Set seed for reproducibility
+    run_name = generate_slug()
     L.seed_everything(cfg.seed)
 
     accelerator, runtime_cfg = resolve_runtime(cfg.accelerator)
@@ -41,7 +42,7 @@ def main(cfg: DictConfig):
     input_dim = cfg.dataset.in_channels * cfg.dataset.img_size * cfg.dataset.img_size
 
     # Setup checkpoint directory
-    checkpoint_dir = os.path.join(cfg.log_dir, cfg.prefix or f"{cfg.dataset.name}_mlp")
+    checkpoint_dir = os.path.join(cfg.log_dir, f"{cfg.prefix or f'{cfg.dataset.name}_mlp'}_{run_name}")
     os.makedirs(checkpoint_dir, exist_ok=True)
     init_ckpt_path = os.path.join(checkpoint_dir, "init.ckpt")
 
@@ -87,7 +88,7 @@ def main(cfg: DictConfig):
     # When disabled, use False to prevent Lightning from creating default lightning_logs/ directory
     if cfg.get("wandb", {}).get("enabled", False):
         wandb_cfg = cfg.wandb
-        run_name = wandb_cfg.get("name") or generate_slug()
+        run_name = wandb_cfg.get("name") or run_name
         logger = WandbLogger(
             project=wandb_cfg.get("project", "momos-reproduction"),
             entity=wandb_cfg.get("entity", None),
