@@ -143,14 +143,14 @@ class ImageDataModule(L.LightningDataModule):
         kwargs = {
             "batch_size": self.batch_size,
             "shuffle": shuffle,
-            "num_workers": int(self.runtime["num_workers"]),
+            "num_workers": int(self.runtime["num_workers"]),  # type: ignore
             "pin_memory": bool(self.runtime["pin_memory"]),
         }
         if kwargs["num_workers"] > 0:
             kwargs["persistent_workers"] = bool(self.runtime["persistent_workers"])
             if self.runtime["prefetch_factor"] is not None:
                 kwargs["prefetch_factor"] = int(self.runtime["prefetch_factor"])
-        return DataLoader(dataset, **kwargs)
+        return DataLoader(dataset, **kwargs)  # type: ignore
 
     def train_dataloader(self):
         """Return training DataLoader."""

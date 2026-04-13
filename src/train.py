@@ -1,7 +1,5 @@
 """Training entry point using PyTorch Lightning and Hydra."""
 
-import os
-
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import lightning as L

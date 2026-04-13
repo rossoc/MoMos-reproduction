@@ -21,8 +21,7 @@ def generate_unique_run_name(base_dir, slug):
         return f"0_{slug}"
 
     existing_runs = [
-        d for d in os.listdir(base_dir)
-        if os.path.isdir(os.path.join(base_dir, d))
+        d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))
     ]
     numbers = []
     for d in existing_runs:
