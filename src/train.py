@@ -3,13 +3,15 @@
 import os
 
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 import lightning as L
 from lightning.pytorch.callbacks import (
     EarlyStopping,
     ModelCheckpoint,
     LearningRateMonitor,
 )
+from lightning.pytorch.loggers import WandbLogger
+from coolname import generate_slug
 
 from data import ImageDataModule
 from model.lit_module import LitMLP
@@ -71,11 +73,11 @@ def main(cfg: DictConfig):
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=checkpoint_dir,
-        filename="{epoch:02d}-{val/acc:.4f}",
+        filename="best",
         monitor="val/loss",
         mode="min",
         save_top_k=1,
-        save_last=True,
+        save_last=False,
     )
     callbacks.append(checkpoint_callback)
 
@@ -89,17 +91,48 @@ def main(cfg: DictConfig):
         )
         callbacks.append(early_stopping)
 
+    # Setup W&B logger (if enabled)
+    # When disabled, use False to prevent Lightning from creating default lightning_logs/ directory
+    if cfg.get("wandb", {}).get("enabled", False):
+        wandb_cfg = cfg.wandb
+        run_name = wandb_cfg.get("name") or generate_slug()
+        logger = WandbLogger(
+            project=wandb_cfg.get("project", "momos-reproduction"),
+            entity=wandb_cfg.get("entity", None),
+            name=run_name,
+            tags=wandb_cfg.get("tags", []),
+            log_model=wandb_cfg.get("log_model", False),
+            save_dir=cfg.log_dir,
+        )
+        # Log full Hydra config to W&B
+        logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+        logger.experiment.config.update(
+            {
+                "input_dim": input_dim,
+                "num_workers": num_workers,
+            }
+        )
+    else:
+        # Explicitly disable logging to prevent lightning_logs/ directory creation
+        logger = False
+
     # Create Trainer
     trainer = L.Trainer(
         max_epochs=cfg.epochs,
         accelerator=cfg.accelerator,
         devices=cfg.devices,
         callbacks=callbacks,
+        logger=logger,
         log_every_n_steps=50,
         enable_progress_bar=True,
         enable_model_summary=True,
         deterministic=True,
     )
+
+    # Save initial checkpoint before training
+    init_ckpt_path = os.path.join(checkpoint_dir, "init.ckpt")
+    trainer.save_checkpoint(init_ckpt_path)
+    print(f"Saved initial checkpoint: {init_ckpt_path}")
 
     # Train
     trainer.fit(model, datamodule=datamodule)

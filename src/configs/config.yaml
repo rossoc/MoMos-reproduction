@@ -2,6 +2,8 @@ defaults:
   - dataset: cifar10
   - model: mlp
   - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
 
 # Training overrides
 epochs: 200
@@ -18,5 +20,23 @@ accelerator: auto
 devices: 1
 
 # Logging
-log_dir: ./logs
+log_dir: ./outputs
 prefix: ""
+
+# Hydra output configuration
+hydra:
+  output_subdir: null
+  run:
+    dir: ./outputs
+  sweep:
+    dir: ./outputs
+    subdir: ${hydra.job.name}
+
+# Weights & Biases
+wandb:
+  enabled: true
+  project: momos-reproduction
+  entity: Carlo
+  name: null
+  tags: []
+  log_model: true
