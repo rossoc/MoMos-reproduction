@@ -13,7 +13,6 @@ seed: 42
 # Data
 data_dir: ./data
 batch_size: 128
-num_workers: null
 
 # Trainer
 accelerator: auto
@@ -36,7 +35,7 @@ hydra:
 wandb:
   enabled: true
   project: momos-reproduction
-  entity: Carlo
+  entity: null
   name: null
   tags: []
   log_model: true

@@ -1,6 +1,8 @@
 import random
 import torch
 import numpy as np
+import os
+from omegaconf import OmegaConf
 
 
 def normalize_pct(value, field_name):
@@ -56,74 +58,33 @@ def resolve_device(mode):
         if torch.cuda.is_available():
             return "cuda"
         return "mps" if has_mps else "cpu"
-    if mode == "cuda":
+    elif mode == "cuda":
         if not torch.cuda.is_available():
             raise RuntimeError("Requested CUDA but it is not available.")
         return "cuda"
-    if mode == "mps":
+    elif mode == "mps":
         if not has_mps:
             raise RuntimeError("Requested MPS but it is not available.")
         return "mps"
-    if mode == "cpu":
+    elif mode == "cpu":
         return "cpu"
     raise ValueError(f"Unknown device mode: {mode}")
 
 
-def runtime_profile(device, num_workers=None, pin_memory=None, prefetch_factor=None):
-    """Return default data-loading/runtime settings for a device.
+def resolve_runtime(mode):
+    accelerator = resolve_device(mode)
 
-    Args:
-        device: Resolved device string from `resolve_device`.
-        num_workers: Optional explicit worker override.
-        pin_memory: Optional explicit pin-memory override.
-        prefetch_factor: Optional DataLoader prefetch override (workers > 0 only).
+    if accelerator in ("cuda", "mps", "cpu"):
+        runtime_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "configs",
+            "runtime",
+            f"{accelerator}.yaml",
+        )
+        if os.path.exists(runtime_path):
+            runtime_cfg = OmegaConf.load(runtime_path)
 
-    Returns:
-        Runtime config dict used by data loading and transfers.
-    """
-    profiles = {
-        "cuda": {
-            "num_workers": 4,
-            "pin_memory": True,
-            "persistent_workers": True,
-            "prefetch_factor": 2,
-            "transfer": {"non_blocking": True, "channels_last": True},
-        },
-        "mps": {
-            "num_workers": 0,
-            "pin_memory": False,
-            "persistent_workers": False,
-            "prefetch_factor": None,
-            "transfer": {"non_blocking": False, "channels_last": False},
-        },
-        "cpu": {
-            "num_workers": 4,
-            "pin_memory": False,
-            "persistent_workers": True,
-            "prefetch_factor": 2,
-            "transfer": {"non_blocking": False, "channels_last": False},
-        },
-    }
-
-    cfg = dict(profiles[device])
-    cfg["transfer"] = dict(cfg["transfer"])
-
-    if num_workers is not None:
-        cfg["num_workers"] = int(num_workers)
-    if pin_memory is not None:
-        cfg["pin_memory"] = bool(pin_memory)
-
-    if prefetch_factor is not None:
-        prefetch_factor = int(prefetch_factor)
-        if prefetch_factor <= 0:
-            raise ValueError(f"prefetch_factor must be > 0, got {prefetch_factor}")
-        cfg["prefetch_factor"] = prefetch_factor
-
-    if cfg["num_workers"] <= 0:
-        cfg["num_workers"] = 0
-        cfg["persistent_workers"] = False
-        cfg["prefetch_factor"] = None
-    return cfg
+    return accelerator, runtime_cfg
 
 
 def configure_cuda_fast_path():

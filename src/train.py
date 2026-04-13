@@ -15,6 +15,7 @@ from coolname import generate_slug
 
 from data import ImageDataModule
 from model.lit_module import LitMLP
+from utils.init import resolve_runtime
 
 
 @hydra.main(config_path="configs", config_name="config", version_base="1.3")
@@ -23,15 +24,7 @@ def main(cfg: DictConfig):
     # Set seed for reproducibility
     L.seed_everything(cfg.seed)
 
-    # Resolve num_workers from runtime profile
-    num_workers = cfg.num_workers
-    if num_workers is None:
-        if cfg.accelerator == "cuda":
-            num_workers = 4
-        elif cfg.accelerator == "cpu":
-            num_workers = 4
-        else:
-            num_workers = 0
+    accelerator, runtime_cfg = resolve_runtime(cfg.accelerator)
 
     # Create DataModule
     datamodule: ImageDataModule = ImageDataModule(
@@ -41,16 +34,16 @@ def main(cfg: DictConfig):
         img_size=cfg.dataset.img_size,
         val_pct=cfg.dataset.val_pct,
         test_pct=cfg.dataset.test_pct,
-        runtime={
-            "num_workers": num_workers,
-            "pin_memory": cfg.accelerator == "cuda",
-            "persistent_workers": num_workers > 0,
-            "prefetch_factor": 2 if num_workers > 0 else None,
-        },
+        runtime=runtime_cfg,
     )
 
     # Calculate input dimension
     input_dim = cfg.dataset.in_channels * cfg.dataset.img_size * cfg.dataset.img_size
+
+    # Setup checkpoint directory
+    checkpoint_dir = os.path.join(cfg.log_dir, cfg.prefix or f"{cfg.dataset.name}_mlp")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    init_ckpt_path = os.path.join(checkpoint_dir, "init.ckpt")
 
     # Create LightningModule
     model = LitMLP(
@@ -59,6 +52,7 @@ def main(cfg: DictConfig):
         learning_rate=cfg.model.learning_rate,
         weight_decay=cfg.model.weight_decay,
         epochs=cfg.epochs,
+        save_init_path=init_ckpt_path,
     )
 
     # Setup callbacks
@@ -68,8 +62,6 @@ def main(cfg: DictConfig):
     callbacks.append(LearningRateMonitor(logging_interval="epoch"))
 
     # Model checkpointing (uses Hydra's output dir)
-    checkpoint_dir = os.path.join(cfg.log_dir, cfg.prefix or f"{cfg.dataset.name}_mlp")
-    os.makedirs(checkpoint_dir, exist_ok=True)
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=checkpoint_dir,
@@ -106,12 +98,6 @@ def main(cfg: DictConfig):
         )
         # Log full Hydra config to W&B
         logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
-        logger.experiment.config.update(
-            {
-                "input_dim": input_dim,
-                "num_workers": num_workers,
-            }
-        )
     else:
         # Explicitly disable logging to prevent lightning_logs/ directory creation
         logger = False
@@ -128,11 +114,6 @@ def main(cfg: DictConfig):
         enable_model_summary=True,
         deterministic=True,
     )
-
-    # Save initial checkpoint before training
-    init_ckpt_path = os.path.join(checkpoint_dir, "init.ckpt")
-    trainer.save_checkpoint(init_ckpt_path)
-    print(f"Saved initial checkpoint: {init_ckpt_path}")
 
     # Train
     trainer.fit(model, datamodule=datamodule)

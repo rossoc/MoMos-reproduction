@@ -1,0 +1,7 @@
+num_workers: 0
+pin_memory: false
+persistent_workers: false
+prefetch_factor: null
+transfer:
+  non_blocking: false
+  channels_last: false
