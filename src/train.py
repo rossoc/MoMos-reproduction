@@ -3,17 +3,13 @@
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import lightning as L
-from lightning.pytorch.callbacks import (
-    EarlyStopping,
-    ModelCheckpoint,
-    LearningRateMonitor,
-)
 from lightning.pytorch.loggers import WandbLogger
 from coolname import generate_slug
 
 from data import ImageDataModule
 from model.lit_module import LitMLP
 from utils.init import resolve_runtime, setup_checkpoint_dir
+from utils.callbacks import build_callbacks
 
 
 @hydra.main(config_path="configs", config_name="config", version_base="1.3")
@@ -57,33 +53,20 @@ def main(cfg: DictConfig):
         save_init_path=init_ckpt_path,
     )
 
-    # Setup callbacks
-    callbacks = []
-
-    # Learning rate monitor
-    callbacks.append(LearningRateMonitor(logging_interval="epoch"))
-
-    # Model checkpointing (uses Hydra's output dir)
-
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=checkpoint_dir,
-        filename="best",
-        monitor="val/loss",
-        mode="min",
-        save_top_k=1,
-        save_last=False,
+    # Setup callbacks via factory
+    has_logger = cfg.get("wandb", {}).get("enabled", False)
+    callbacks = build_callbacks(
+        cfg=cfg,
+        checkpoint_dir=checkpoint_dir,
+        unique_run_name=unique_run_name,
+        has_logger=has_logger,
     )
-    callbacks.append(checkpoint_callback)
 
-    # Early stopping (optional)
-    if cfg.patience is not None and cfg.patience > 0:
-        early_stopping = EarlyStopping(
-            monitor="val/loss",
-            mode="min",
-            patience=cfg.patience,
-            verbose=True,
-        )
-        callbacks.append(early_stopping)
+    # Extract checkpoint callback for later reference
+    checkpoint_callback = next(
+        (cb for cb in callbacks if isinstance(cb, L.pytorch.callbacks.ModelCheckpoint)),
+        None,
+    )
 
     # Setup W&B logger (if enabled)
     # When disabled, use False to prevent Lightning from creating default lightning_logs/ directory

@@ -39,3 +39,18 @@ wandb:
   name: null
   tags: []
   log_model: true
+
+# Quantization
+quantization:
+  enabled: false
+  method: null  # "qat", "momos", or null
+  q: 32         # Bit-width for QAT (>=32 means no quantization)
+  s: null       # Block size for MoMos
+  k: null       # Motif count for MoMos
+  capacity: null  # Alternative to k (fraction of blocks)
+  force_zero: true  # Include all-zero motif in MoMos
+  exclude_layers: []  # Layer name substrings to exclude from QAT
+
+# Metrics
+metrics: []  # e.g., [sparsity, l2, gzip, bz2, lzma, bdm]
+all_compression_metrics_binarized: false
