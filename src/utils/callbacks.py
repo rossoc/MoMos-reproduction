@@ -67,6 +67,14 @@ class QuantizationCallback(L.Callback):
             return
 
         model = pl_module.model
+
+        # Resolve k from capacity if needed
+        if self.quant_cfg.get("k") is None and self.quant_cfg.get("capacity") is not None:
+            from quantizers import k_from_capacity
+            self.quant_cfg["k"] = k_from_capacity(
+                model, self.quant_cfg["s"], self.quant_cfg["capacity"]
+            )
+
         stats = quantize(model, self.quant_cfg)
 
         if stats is not None:
@@ -169,7 +177,15 @@ def build_callbacks(
                 full_quant_cfg["exclude_layers"] = quant_cfg.get("exclude_layers", [])
             elif method.lower() == "momos":
                 full_quant_cfg["s"] = int(quant_cfg["s"])
-                full_quant_cfg["k"] = int(quant_cfg["k"])
+                # Resolve k from direct value or capacity
+                if quant_cfg.get("k") is not None:
+                    full_quant_cfg["k"] = int(quant_cfg["k"])
+                elif quant_cfg.get("capacity") is not None:
+                    # Will be resolved by callback using model at epoch end
+                    full_quant_cfg["capacity"] = float(quant_cfg["capacity"])
+                    full_quant_cfg["k"] = None  # placeholder, resolved in callback
+                else:
+                    raise ValueError("MoMos requires either k or capacity in config")
                 full_quant_cfg["force_zero"] = bool(quant_cfg.get("force_zero", True))
                 if "chunk_size" in quant_cfg:
                     full_quant_cfg["chunk_size"] = quant_cfg["chunk_size"]
