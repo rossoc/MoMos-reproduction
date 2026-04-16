@@ -10,8 +10,12 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "coolname>=4.2.0",
+    "dotenv>=0.9.9",
     "hydra-core>=1.3.2",
+    "ipykernel>=7.2.0",
     "lightning>=2.6.1",
+    "matplotlib>=3.10.8",
+    "pandas>=3.0.2",
     "pybdm>=0.1.0",
     "torch>=2.11.0",
     "torchvision>=0.26.0",
