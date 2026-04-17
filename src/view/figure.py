@@ -65,7 +65,6 @@ class Figure:
             )
 
     def _default_settings(self, x_label, y_label, exp_name, style, logx, logy):
-        self._ax().legend()
         self._ax().set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
         self._ax().set_ylabel(y_label, fontproperties=_FONT, fontsize=self.fontsize)
         self._ax().ticklabel_format(
@@ -102,8 +101,12 @@ class Figure:
         markersize=5,
         skip_n=0,
         pop_n=0,
+        colors=_COLORS,
     ):
         self._next_plot()
+        if exp_name is not None:
+            self._ax().legend()
+
         for i, (name, points) in enumerate(data.items()):
             if isinstance(points, pd.DataFrame):
                 points = points.dropna().to_numpy().T
@@ -113,7 +116,7 @@ class Figure:
                 symbol,
                 markersize=markersize,
                 label=name,
-                color=_COLORS[i % len(_COLORS)],
+                color=colors[i % len(colors)],
             )
 
         self._default_settings(x_label, y_label, exp_name, style, logx, logy)
@@ -158,7 +161,10 @@ class Figure:
 
     def plot3D(
         self,
-        data: list[tuple[str, list[float]]],
+        data: tuple[list[float], list[float], list[float]],
+        x_label: str,
+        y_label: str,
+        z_label: str,
         exp_name: str,
         cmap="viridis",
         levels=20,
@@ -186,12 +192,10 @@ class Figure:
 
         assert len(data) == 3
 
-        cntr = ax.tricontourf(
-            data[0][1], data[1][1], data[2][1], cmap=cmap, levels=levels
-        )
+        cntr = ax.tricontourf(data[0], data[1], data[2], cmap=cmap, levels=levels)
 
         cbar = plt.colorbar(cntr, ax=ax)
-        cbar.set_label(data[2][0], fontproperties=_FONT, size=self.fontsize)
+        cbar.set_label(z_label, fontproperties=_FONT, size=self.fontsize)
 
         if self.ncols == 1 and self.nrows == 1:
             self.fig.suptitle(
@@ -201,8 +205,8 @@ class Figure:
         else:
             ax.set_title(exp_name, fontproperties=_FONT, fontsize=self.fontsize)
 
-        ax.set_xlabel(data[0][0], fontproperties=_FONT, fontsize=self.fontsize)
-        ax.set_ylabel(data[1][0], fontproperties=_FONT, fontsize=self.fontsize)
+        ax.set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax.set_ylabel(y_label, fontproperties=_FONT, fontsize=self.fontsize)
         ax.ticklabel_format(
             axis="both", useMathText=True, useOffset=True, style=style, scilimits=(0, 0)
         )
@@ -213,6 +217,65 @@ class Figure:
 
         if logy > 1:
             ax.set_yscale("log", base=logy)
+
+    def plot_twinx(
+        self,
+        data: Any,
+        exp_name: str,
+        y1_label="Loss",
+        y2_label="Val. Loss",
+        logx=False,
+        logy=False,
+        x_label="Epochs",
+        symbol="-",
+        style: Literal["sci", "scientific", "plain"] = "plain",
+        figSize=(12, 8),
+        markersize=5,
+        skip_n=0,
+        pop_n=0,
+        colors=_COLORS,
+    ):
+        self._next_plot()
+        if exp_name is not None:
+            self._ax().legend()
+
+        if self.ncols > 1:
+            plt.rcParams["figure.subplot.right"] = 0.35
+
+        if isinstance(data[0], pd.DataFrame):
+            points = data[0].dropna().to_numpy().T
+
+        self._ax().plot(
+            points[0][skip_n : len(points[0]) - pop_n],
+            points[1][skip_n : len(points[0]) - pop_n],
+            symbol,
+            markersize=markersize,
+            label=y1_label,
+            color=colors[0],
+        )
+
+        ax2 = self._ax().twinx()
+
+        if isinstance(data[1], pd.DataFrame):
+            points = data[1].dropna().to_numpy().T
+
+        ax2.plot(
+            points[0][skip_n : len(points[0]) - pop_n],
+            points[1][skip_n : len(points[0]) - pop_n],
+            symbol,
+            markersize=markersize,
+            label=y2_label,
+            color=colors[1],
+        )
+
+        ax2.set_ylabel(y2_label)
+
+        self._default_settings(x_label, y1_label, exp_name, style, logx, logy)
+
+        lines1, labels1 = self._ax().get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+
+        self._ax().legend(lines1 + lines2, labels1 + labels2)
 
     def save(self, figure_name: str):
         import numpy as np
@@ -234,4 +297,5 @@ class Figure:
             )
 
     def show(self):
+        self.fig.tight_layout()
         self.fig.show()
