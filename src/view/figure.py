@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 from typing import Literal, Any
 from matplotlib import font_manager
 import pandas as pd
+import numpy as np
 
 _FONT = font_manager.FontProperties(fname="note/fonts/HKGrotesk-Regular.ttf")
 
@@ -33,7 +34,7 @@ _COLORS = [
 
 
 class Figure:
-    def __init__(self, title=None, figSize=(12, 8), ncols=1, nrows=1, fontsize=13):
+    def __init__(self, title=None, figSize=(10, 7), ncols=1, nrows=1, fontsize=13):
         self.figSize = figSize
         self.fontsize = fontsize
         self.ncols = ncols
@@ -64,28 +65,31 @@ class Figure:
                 f"Too many plots on the current figure. Available axes: {self.ncols * self.nrows}, Current plot index: {self.plot_index}"
             )
 
-    def _default_settings(self, x_label, y_label, exp_name, style, logx, logy):
-        self._ax().set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
-        self._ax().set_ylabel(y_label, fontproperties=_FONT, fontsize=self.fontsize)
-        self._ax().ticklabel_format(
-            axis="both", useMathText=True, useOffset=True, style=style, scilimits=(0, 0)
+    def _default_settings(
+        self, x_label, y_label, exp_name, style, logx, logy, limits=None, ax=None
+    ):
+        ax = ax or self._ax()
+        ax.set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax.set_ylabel(y_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax.ticklabel_format(
+            axis="both", useMathText=True, useOffset=True, style=style, scilimits=limits
         )
         if self.ncols == 1 and self.nrows == 1:
             self.fig.suptitle(
                 exp_name, fontproperties=_FONT, fontsize=self.fontsize * 1.5
             )
         else:
-            self._ax().set_title(exp_name)
+            ax.set_title(exp_name)
 
-        self._ax().grid(True)
-        self._ax().set_xlim(left=0)
-        self._ax().set_ylim(bottom=0)
+        ax.grid(True)
+        ax.set_xlim(left=0)
+        ax.set_ylim(bottom=0)
 
         if logx:
-            self._ax().set_xscale("log")
+            ax.set_xscale("log")
 
         if logy:
-            self._ax().set_yscale("log")
+            ax.set_yscale("log")
 
     def plot(
         self,
@@ -97,15 +101,13 @@ class Figure:
         y_label="Loss",
         symbol="-",
         style: Literal["sci", "scientific", "plain"] = "plain",
-        figSize=(12, 8),
         markersize=5,
         skip_n=0,
         pop_n=0,
         colors=_COLORS,
+        legend=True,
     ):
         self._next_plot()
-        if exp_name is not None:
-            self._ax().legend()
 
         for i, (name, points) in enumerate(data.items()):
             if isinstance(points, pd.DataFrame):
@@ -120,6 +122,8 @@ class Figure:
             )
 
         self._default_settings(x_label, y_label, exp_name, style, logx, logy)
+        if legend:
+            self._ax().legend()
 
     def plot_with_var(
         self,
@@ -229,23 +233,19 @@ class Figure:
         x_label="Epochs",
         symbol="-",
         style: Literal["sci", "scientific", "plain"] = "plain",
-        figSize=(12, 8),
         markersize=5,
         skip_n=0,
         pop_n=0,
         colors=_COLORS,
     ):
         self._next_plot()
-        if exp_name is not None:
-            self._ax().legend()
 
-        if self.ncols > 1:
-            plt.rcParams["figure.subplot.right"] = 0.35
+        ax1 = self._ax()
 
         if isinstance(data[0], pd.DataFrame):
             points = data[0].dropna().to_numpy().T
 
-        self._ax().plot(
+        ax1.plot(
             points[0][skip_n : len(points[0]) - pop_n],
             points[1][skip_n : len(points[0]) - pop_n],
             symbol,
@@ -254,8 +254,15 @@ class Figure:
             color=colors[0],
         )
 
-        ax2 = self._ax().twinx()
+        ax1.grid(True)
 
+        if logx:
+            ax1.set_xscale("log")
+
+        if logy:
+            ax1.set_yscale("log")
+
+        ax2 = ax1.twinx()
         if isinstance(data[1], pd.DataFrame):
             points = data[1].dropna().to_numpy().T
 
@@ -268,18 +275,19 @@ class Figure:
             color=colors[1],
         )
 
-        ax2.set_ylabel(y2_label)
+        ax1.set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax1.set_ylabel(y1_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax1.ticklabel_format(axis="both", useMathText=True, useOffset=True, style=style)
+        ax2.set_ylabel(y2_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax2.ticklabel_format(axis="y", useMathText=True, useOffset=True, style=style)
 
-        self._default_settings(x_label, y1_label, exp_name, style, logx, logy)
-
-        lines1, labels1 = self._ax().get_legend_handles_labels()
+        lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
 
-        self._ax().legend(lines1 + lines2, labels1 + labels2)
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
+        ax2.legend([], [], title=exp_name, loc="lower left")
 
-    def save(self, figure_name: str):
-        import numpy as np
-
+    def save(self, figure_name: str, pdf_handle: Any = None):
         if not hasattr(self, "ax_flat"):
             if isinstance(self.ax, np.ndarray):
                 self.ax_flat = self.ax.flatten().tolist()
@@ -288,13 +296,18 @@ class Figure:
             else:
                 self.ax_flat = [self.ax]
 
+        fig = None
         if hasattr(self, "fig") and self.fig is not None:
-            self.fig.savefig(f"{figure_name}.pdf", bbox_inches="tight")
+            fig = self.fig
         else:
-            # Fallback: get the figure from the first axis in the list
-            self.ax_flat[0].get_figure().savefig(
-                f"{figure_name}.pdf", bbox_inches="tight"
-            )
+            fig = self.ax_flat[0].get_figure()
+
+        self.fig.tight_layout()
+
+        if pdf_handle is not None:
+            pdf_handle.savefig(self.fig, bbox_inches="tight")
+        else:
+            fig.savefig(f"{figure_name}.pdf", bbox_inches="tight")
 
     def show(self):
         self.fig.tight_layout()
