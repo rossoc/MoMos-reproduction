@@ -59,7 +59,9 @@ class QuantizationCallback(L.Callback):
                 f"bitwidth={stats.get('q_bits', '?')}"
             )
         else:
-            print(f"QAT disabled (bitwidth >= 32): disabled_modules={stats.get('disabled_modules', 0)}")
+            print(
+                f"QAT disabled (bitwidth >= 32): disabled_modules={stats.get('disabled_modules', 0)}"
+            )
 
     def on_train_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule):
         """Apply MoMos projection at the end of each training epoch."""
@@ -69,8 +71,12 @@ class QuantizationCallback(L.Callback):
         model = pl_module.model
 
         # Resolve k from capacity if needed
-        if self.quant_cfg.get("k") is None and self.quant_cfg.get("capacity") is not None:
+        if (
+            self.quant_cfg.get("k") is None
+            and self.quant_cfg.get("capacity") is not None
+        ):
             from quantizers import k_from_capacity
+
             self.quant_cfg["k"] = k_from_capacity(
                 model, self.quant_cfg["s"], self.quant_cfg["capacity"]
             )
@@ -83,7 +89,9 @@ class QuantizationCallback(L.Callback):
             q_time = stats.get("q_time", 0.0)
 
             pl_module.log("quant/distortion", distortion, on_epoch=True, prog_bar=False)
-            pl_module.log("quant/changed_weights", changed, on_epoch=True, prog_bar=False)
+            pl_module.log(
+                "quant/changed_weights", changed, on_epoch=True, prog_bar=False
+            )
             pl_module.log("quant/q_time", q_time, on_epoch=True, prog_bar=False)
 
             print(
@@ -103,7 +111,9 @@ class QuantizationCallback(L.Callback):
             )
             for name, value in metrics.items():
                 if value is not None:
-                    pl_module.log(f"metrics/{name}", value, on_epoch=True, prog_bar=False)
+                    pl_module.log(
+                        f"metrics/{name}", value, on_epoch=True, prog_bar=False
+                    )
         except Exception as e:
             print(f"Warning: Failed to compute metrics: {e}")
 
@@ -151,6 +161,15 @@ def build_callbacks(
     )
     callbacks.append(checkpoint_callback)
 
+    periodic_checkpoint = ModelCheckpoint(
+        dirpath=checkpoint_dir,
+        filename="epoch-{epoch:02d}",  # Includes epoch number in filename
+        every_n_epochs=10,
+        save_top_k=-1,  # Set to -1 to keep all periodic checkpoints
+        # Or set to 3 to keep only the last 3 periodic ones
+    )
+    callbacks.append(periodic_checkpoint)
+
     # Early stopping (optional)
     patience = cfg.get("patience")
     if patience is not None and patience > 0:
@@ -192,13 +211,17 @@ def build_callbacks(
                 if "chunk_progress" in quant_cfg:
                     full_quant_cfg["chunk_progress"] = bool(quant_cfg["chunk_progress"])
                 if "chunk_progress_elements" in quant_cfg:
-                    full_quant_cfg["chunk_progress_elements"] = quant_cfg["chunk_progress_elements"]
+                    full_quant_cfg["chunk_progress_elements"] = quant_cfg[
+                        "chunk_progress_elements"
+                    ]
 
             callbacks.append(
                 QuantizationCallback(
                     quant_cfg=full_quant_cfg,
                     metric_names=cfg.get("metrics", []),
-                    compression_binarized=cfg.get("all_compression_metrics_binarized", False),
+                    compression_binarized=cfg.get(
+                        "all_compression_metrics_binarized", False
+                    ),
                 )
             )
 

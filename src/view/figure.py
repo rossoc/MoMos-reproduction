@@ -3,6 +3,7 @@ from typing import Literal, Any
 from matplotlib import font_manager
 import pandas as pd
 import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 
 _FONT = font_manager.FontProperties(fname="note/fonts/HKGrotesk-Regular.ttf")
 
@@ -66,14 +67,34 @@ class Figure:
             )
 
     def _default_settings(
-        self, x_label, y_label, exp_name, style, logx, logy, limits=None, ax=None
+        self,
+        x_label,
+        y_label,
+        exp_name,
+        style,
+        logx,
+        logy,
+        limits=None,
+        ax=None,
+        axis=None,
     ):
         ax = ax or self._ax()
         ax.set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
         ax.set_ylabel(y_label, fontproperties=_FONT, fontsize=self.fontsize)
-        ax.ticklabel_format(
-            axis="both", useMathText=True, useOffset=True, style=style, scilimits=limits
-        )
+
+        if limits is not None:
+            ax.ticklabel_format(
+                axis="both",
+                useMathText=True,
+                useOffset=True,
+                style=style,
+                scilimits=limits,
+            )
+        else:
+            ax.ticklabel_format(
+                axis="both", useMathText=True, useOffset=True, style=style
+            )
+
         if self.ncols == 1 and self.nrows == 1:
             self.fig.suptitle(
                 exp_name, fontproperties=_FONT, fontsize=self.fontsize * 1.5
@@ -82,8 +103,9 @@ class Figure:
             ax.set_title(exp_name)
 
         ax.grid(True)
-        ax.set_xlim(left=0)
-        ax.set_ylim(bottom=0)
+        if axis:
+            ax.set_xlim(left=axis[0])
+            ax.set_ylim(bottom=axis[0])
 
         if logx:
             ax.set_xscale("log")
@@ -106,6 +128,8 @@ class Figure:
         pop_n=0,
         colors=_COLORS,
         legend=True,
+        limits=None,
+        axis=(0, 0),
     ):
         self._next_plot()
 
@@ -121,7 +145,9 @@ class Figure:
                 color=colors[i % len(colors)],
             )
 
-        self._default_settings(x_label, y_label, exp_name, style, logx, logy)
+        self._default_settings(
+            x_label, y_label, exp_name, style, logx, logy, limits=limits, axis=axis
+        )
         if legend:
             self._ax().legend()
 
@@ -287,7 +313,13 @@ class Figure:
         ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
         ax2.legend([], [], title=exp_name, loc="lower left")
 
-    def save(self, figure_name: str, pdf_handle: Any = None):
+    def save(self, figure_name: str = "", pdf: PdfPages = None):
+        """Save figure to PDF.
+
+        Args:
+            figure_name: Filename for standalone save (used if pdf is None)
+            pdf: PdfPages object to save to (used if figure_name is empty)
+        """
         if not hasattr(self, "ax_flat"):
             if isinstance(self.ax, np.ndarray):
                 self.ax_flat = self.ax.flatten().tolist()
@@ -295,6 +327,10 @@ class Figure:
                 self.ax_flat = self.ax
             else:
                 self.ax_flat = [self.ax]
+
+        for ax in self.ax_flat:
+            for line in ax.get_lines():
+                line.set_rasterized(True)
 
         fig = None
         if hasattr(self, "fig") and self.fig is not None:
@@ -304,8 +340,8 @@ class Figure:
 
         self.fig.tight_layout()
 
-        if pdf_handle is not None:
-            pdf_handle.savefig(self.fig, bbox_inches="tight")
+        if pdf is not None:
+            pdf.savefig(self.fig, bbox_inches="tight")
         else:
             fig.savefig(f"{figure_name}.pdf", bbox_inches="tight")
 

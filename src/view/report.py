@@ -62,9 +62,10 @@ def report(filename, experiments, momos_data, group_by, momos_runs, show=True):
         "LZMA Compression Rate": "metrics/lzma_compression_rate",
         "BDM Complexity": "metrics/bdm_complexity",
         "GZip Compression Rate": "metrics/gzip_compression_rate",
+        "L2": "metrics/weight_l2",
     }
     for name, key in metrics.items():
-        fig = Figure(f"{name} vs Accuracy", ncols=2, nrows=2)
+        fig = Figure(f"{name} vs Validation Loss", ncols=2, nrows=2)
         for i in range(4):
             _ = fig.plot_twinx(
                 (
@@ -81,15 +82,8 @@ def report(filename, experiments, momos_data, group_by, momos_runs, show=True):
     if filename is not None:
         with PdfPages(filename + ".pdf") as pdf:
             for fig in figures:
-                fig.save("", pdf)
+                fig.save(pdf=pdf)
 
     if show:
         for fig in figures:
             fig.show()
-            
-
-def _compute_rac(run):
-    s = run["config"]["s"]
-    k = run["config"]["k"]
-    q = run["config"]["q"]
-

@@ -23,6 +23,7 @@ MOMOS_METRICS = [
     "metrics/gzip_compression_rate",
     "metrics/bz2_compression_rate",
     "metrics/lzma_compression_rate",
+    "metrics/weight_l2",
     "metrics/sparsity",
     "quant/distortion",
     "quant/changed_weights",

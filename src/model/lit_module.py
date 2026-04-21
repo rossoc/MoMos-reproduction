@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import lightning as L
 
-from model.mlp import MLP
+from .mlp import MLP
 
 
 class LitMLP(L.LightningModule):

@@ -21,6 +21,7 @@ from src.view import fetch_runs
 from src.view.report import report
 import numpy as np
 import pickle
+import wandb
 
 # %%
 # Define cache file path
@@ -45,6 +46,7 @@ momos_data = {"capacity": [], "s": [], "val_acc": []}
 
 for exp in experiments:
     exp["val/acc"] = float(np.max(exp["metrics"]["val/acc"]))
+    exp["run_name"] = exp["name"]
     if (
         exp["config"].get("quantization", None) is not None
         and exp["config"]["quantization"]["method"] == "momos"
@@ -88,6 +90,7 @@ for r in momos_runs:
 momos_runs.sort(key=lambda x: x["val/acc"], reverse=True)
 qat_runs.sort(key=lambda x: x["val/acc"], reverse=True)
 baseline_runs.sort(key=lambda x: x["val/acc"], reverse=True)
+experiments.sort(key=lambda x: x["val/acc"], reverse=True)
 # %%
 report(
     "Experiment1",
@@ -97,3 +100,24 @@ report(
     momos_runs,
     show=False,
 )
+
+
+# %%
+for r in momos_runs[:4]:
+    print(r["run_name"])
+# %%
+best_runs_artifacts = [
+    "model-shlxpkpa:v0",  # 23
+    "model-ab1nlxax:v0",  # 21
+    "model-upxb9glw:v0",  # 20
+    "model-x63vszuv:v0",  # 22
+    "model-26q8yc0n:v0",  # 53
+]
+api = wandb.Api()
+for r in best_runs_artifacts[-1:]:
+    artifact = api.artifact(
+        f"danesinoo-university-of-copenhagen/momos-reproduction/{r}",
+        type="model",
+    )
+    artifact_dir = artifact.download()
+# %%

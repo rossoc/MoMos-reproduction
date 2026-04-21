@@ -38,7 +38,7 @@ wandb:
   entity: null
   name: null
   tags: []
-  log_model: true
+  log_model: all
 
 # Quantization
 quantization:
