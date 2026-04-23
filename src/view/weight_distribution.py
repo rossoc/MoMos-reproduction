@@ -1,24 +1,8 @@
-"""
-Weight Distribution Analysis Module.
-
-Provides functions for analyzing motif distributions in neural network weights:
-1. Count motif repetitions in the model (sorted by size)
-2. Count repetitions per layer
-3. Compute mean/std of motifs
-4. Perform 2D PCA on motifs with k-clustering visualization using Figure class
-"""
-
-# %%
 import torch
 
 from src.view.figure import Figure
 from src.quantizers import iter_trainable_params, tensor_to_blocks
-from matplotlib.backends.backend_pdf import PdfPages
 from src.model import MLP
-
-
-# %%
-
 
 def extract_blocks(model, block_size):
     block_size = int(block_size)
@@ -114,9 +98,6 @@ def report_weight_distribution(
     ]
 
 
-# %%
-
-
 def plot_weights(run):
     model = load_model(run[0])
 
@@ -134,80 +115,3 @@ def plot_weights(run):
     return report_weight_distribution(
         run, counts[sort_idx], scatter_per_layer, scatter_per_single_layer
     )
-
-
-# %%
-
-if __name__ == "__main__":
-    folder = "outputs/cifar10_mlp/0_fantastic-peridot-dingo-of-debate"
-
-    data = [
-        ("artifacts/model-shlxpkpa:v0/model.ckpt", 2, 0.3),  # run 23
-        ("artifacts/model-ab1nlxax:v0/model.ckpt", 2, 0.1),  # run 21
-        ("artifacts/model-upxb9glw:v0/model.ckpt", 2, 0.05),  # run 20
-        ("artifacts/model-x63vszuv:v0/model.ckpt", 2, 0.2),  # run 22
-        # similar to 20
-        (
-            f"{folder}/init.ckpt",
-            2,
-            "0.05 initialization",
-        ),
-        (
-            f"{folder}/epoch-epoch=09.ckpt",
-            2,
-            "0.05 epoch=09",
-        ),
-        (
-            f"{folder}/epoch-epoch=19.ckpt",
-            2,
-            "0.05 epoch=19",
-        ),
-        (
-            f"{folder}/epoch-epoch=29.ckpt",
-            2,
-            "0.05 epoch=29",
-        ),
-        (
-            f"{folder}/epoch-epoch=39.ckpt",
-            2,
-            "0.05 epoch=39",
-        ),
-        (
-            f"{folder}/epoch-epoch=49.ckpt",
-            2,
-            "0.05 epoch=49",
-        ),
-        (
-            f"{folder}/epoch-epoch=59.ckpt",
-            2,
-            "0.05 epoch=59",
-        ),
-        (
-            f"{folder}/epoch-epoch=69.ckpt",
-            2,
-            "0.05 epoch=69",
-        ),
-        (
-            f"{folder}/epoch-epoch=79.ckpt",
-            2,
-            "0.05 epoch=79",
-        ),
-        (
-            f"{folder}/epoch-epoch=89.ckpt",
-            2,
-            "0.05 epoch=89",
-        ),
-        (
-            f"{folder}/epoch-epoch=99.ckpt",
-            2,
-            "0.05 epoch=99",
-        ),
-    ]
-
-    figures = []
-    for d in data:
-        figures += plot_weights(d)
-
-    with PdfPages("weight_analysis.pdf") as pdf:
-        for fig in figures:
-            fig.save(pdf=pdf)

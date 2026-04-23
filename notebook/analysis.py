@@ -19,9 +19,13 @@
 # %%
 from src.view import fetch_runs
 from src.view.report import report
+from src.view.weight_distribution import plot_weights
+
 import numpy as np
 import pickle
 import wandb
+from matplotlib.backends.backend_pdf import PdfPages
+import matplotlib.pyplot as plt
 
 # %%
 # Define cache file path
@@ -121,3 +125,51 @@ for r in best_runs_artifacts[-1:]:
     )
     artifact_dir = artifact.download()
 # %%
+data = [
+    ("artifacts/model-shlxpkpa:v0/model.ckpt", 2, 0.3),  # run 23
+    ("artifacts/model-ab1nlxax:v0/model.ckpt", 2, 0.1),  # run 21
+    ("artifacts/model-upxb9glw:v0/model.ckpt", 2, 0.05),  # run 20
+    ("artifacts/model-x63vszuv:v0/model.ckpt", 2, 0.2),  # run 22
+]
+# %%
+figures = []
+for d in data:
+    figures += plot_weights(d)
+
+with PdfPages("weight_analysis.pdf") as pdf:
+    for fig in figures:
+        fig.save(pdf=pdf)
+
+
+# %%
+
+plt.close()
+# %%
+folder = "outputs/cifar10_mlp/0_fantastic-peridot-dingo-of-debate"
+one_run_many_epochs = [
+    (
+        f"{folder}/init.ckpt",
+        2,
+        "0.05 initialization",
+    ),
+    (
+        f"{folder}/epoch-epoch=09.ckpt",
+        2,
+        "0.05 epoch=09",
+    ),
+] + [
+    (
+        f"{folder}/epoch-epoch={epoch}.ckpt",
+        2,
+        "0.05 epoch={epoch}",
+    )
+    for epoch in range(19, 100, 10)
+]
+# %%
+figures = []
+for d in one_run_many_epochs:
+    figures += plot_weights(d)
+
+with PdfPages("weight_analysis_per_epoch.pdf") as pdf:
+    for fig in figures:
+        fig.save(pdf=pdf)
