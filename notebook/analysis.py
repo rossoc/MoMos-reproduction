@@ -136,13 +136,12 @@ figures = []
 for d in data:
     figures += plot_weights(d)
 
-with PdfPages("weight_analysis.pdf") as pdf:
+with PdfPages("weight_analysis_2.pdf") as pdf:
     for fig in figures:
         fig.save(pdf=pdf)
 
 
 # %%
-
 plt.close()
 # %%
 folder = "outputs/cifar10_mlp/0_fantastic-peridot-dingo-of-debate"
@@ -169,7 +168,12 @@ one_run_many_epochs = [
 figures = []
 for d in one_run_many_epochs:
     figures += plot_weights(d)
-
 with PdfPages("weight_analysis_per_epoch.pdf") as pdf:
+    for fig in figures:
+        fig.save(pdf=pdf)
+# %%
+run_s128 = [("artifacts/model-26q8yc0n:v0/model.ckpt", 128, 0.3)][0]
+figures = plot_weights(run_s128)
+with PdfPages("weight_analysis_s=128.pdf") as pdf:
     for fig in figures:
         fig.save(pdf=pdf)
