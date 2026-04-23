@@ -11,6 +11,7 @@ from .block_utils import (
     k_from_capacity,
     _resolve_chunk_size_blocks,
     _resolve_progress_every_elements,
+    build_swap_motif,
 )
 from .fake_quant import quantize_qat
 
@@ -99,6 +100,7 @@ def momos(
     show_chunk_progress=False,
     progress_prefix="momos",
     progress_every_elements=None,
+    swapping_fn=None,
 ):
     """Apply one MoMos projection step.
 
@@ -169,6 +171,11 @@ def momos(
                 progress_prefix=str(progress_prefix),
                 progress_every_elements=progress_every_elements,
             )
+
+            if swapping_fn is not None:
+                swapped = swapping_fn(nearest)
+                swapped_blocks = (swapped != nearest).sum().item()
+
             quantized_blocks = motifs[nearest]
 
         counts = torch.bincount(nearest, minlength=k_eff).to("cpu", dtype=torch.long)
@@ -190,6 +197,7 @@ def momos(
         "distortion": float(distortion),
         "num_changed_weights": int(changed_weights),
         "motif_counts": motif_counts,
+        "swapped_blocks": swapped_blocks,
     }
 
 
@@ -198,6 +206,17 @@ def momos(
 
 def quantize_momos(model, quant_cfg):
     """Apply one MoMos projection step and return projection stats."""
+    from_percentile = quant_cfg.get("from_percentile", None)
+    to_percentile = quant_cfg.get("to_percentile", None)
+    probability = quant_cfg.get("swapping_probability", None)
+
+    if from_percentile and to_percentile and probability:
+        swapping_function = build_swap_motif(
+            from_percentile, to_percentile, probability
+        )
+    else:
+        swapping_function = None
+
     out = momos(
         model,
         quant_cfg["s"],
@@ -207,6 +226,7 @@ def quantize_momos(model, quant_cfg):
         show_chunk_progress=quant_cfg.get("chunk_progress", False),
         progress_prefix=quant_cfg.get("progress_prefix", "computing nearest motifs"),
         progress_every_elements=quant_cfg.get("chunk_progress_elements"),
+        swapping_fn=swapping_function,
     )
     return out
 
