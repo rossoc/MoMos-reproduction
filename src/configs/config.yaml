@@ -50,6 +50,9 @@ quantization:
   capacity: null  # Alternative to k (fraction of blocks)
   force_zero: true  # Include all-zero motif in MoMos
   exclude_layers: []  # Layer name substrings to exclude from QAT
+  from_percentile: [0.5] # change 50th percentile
+  to_percentile: [0.99] # into 99th percentile
+  swapping_probability: null # e.g. 0.5 otherwise nothing is applied
 
 # Metrics
 metrics: []  # e.g., [sparsity, l2, gzip, bz2, lzma, bdm]

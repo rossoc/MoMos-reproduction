@@ -144,3 +144,46 @@ def _resolve_progress_every_elements(
         return value
     # Default: about 20 progress updates per call.
     return max(1, total_elements // n_reports)
+
+
+def build_swap_motif(from_percentiles, to_percentiles, probability):
+    """
+    Args:
+        from_percentiles (list[float]): List of percentiles (0.0-1.0) to swap FROM.
+        to_percentiles (list[float]): List of percentiles (0.0-1.0) to swap TO.
+        probability (float): Probability of a swap occurring for each identified element.
+    """
+    assert len(from_percentiles) == len(to_percentiles), (
+        "Percentile lists must match in length."
+    )
+
+    def swap(idx):
+        # 1. Frequency Analysis
+        motifs_idx, counts = idx.unique(return_counts=True)
+        sorted_indices = torch.argsort(counts)
+        motifs_sorted = motifs_idx[sorted_indices]
+        num_unique = len(motifs_sorted)
+
+        # 2. Create the result tensor
+        new_idx = idx.clone()
+
+        # 3. Probabilistic Mask
+        # We generate this once to ensure consistent application across all swaps
+        prob_mask = torch.rand(idx.shape, device=idx.device) < probability
+
+        for f_perc, t_perc in zip(from_percentiles, to_percentiles):
+            # Map percentile to specific rank index
+            f_rank = min(int(f_perc * num_unique), num_unique - 1)
+            t_rank = min(int(t_perc * num_unique), num_unique - 1)
+
+            source_motif = motifs_sorted[f_rank]
+            target_motif = motifs_sorted[t_rank]
+
+            # 4. Perform Swap
+            # Match elements that are the source motif AND pass the probability check
+            swap_mask = (idx == source_motif) & prob_mask
+            new_idx[swap_mask] = target_motif
+
+        return new_idx
+
+    return swap

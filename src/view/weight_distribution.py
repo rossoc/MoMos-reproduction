@@ -110,9 +110,7 @@ def plot_weights(run):
     all_blocks = torch.cat(blocks, dim=0)
 
     if all_blocks.shape[1] == 2:
-        motifs, inverse_indexes, counts = all_blocks.unique(
-            dim=0, return_inverse=True, return_counts=True
-        )
+        motifs, counts = all_blocks.unique(dim=0, return_counts=True)
 
         sort_idx = torch.argsort(counts, descending=True)
 
