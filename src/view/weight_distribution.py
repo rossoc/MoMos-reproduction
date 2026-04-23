@@ -58,7 +58,7 @@ def scatter_data(blocks, layers_specs, capacity):
 def report_weight_distribution(
     run, frequencies, scatter_per_layer, scatter_per_layer_single
 ):
-    fig_scatter_per_layer = Figure()
+    fig_scatter_per_layer = Figure(fontsize=17)
     fig_scatter_per_layer.plot(
         scatter_per_layer,
         f"Motifs per layer for S={run[1]}, capacity={run[2]}",
@@ -68,7 +68,7 @@ def report_weight_distribution(
         y_label="$X_2$",
     )
 
-    fig_counts = Figure()
+    fig_counts = Figure(fontsize=17)
     fig_counts.plot(
         frequencies,
         f"Motifs frequencies for S={run[1]}, capacity={run[2]}",
@@ -110,9 +110,7 @@ def plot_weights(run):
     all_blocks = torch.cat(blocks, dim=0)
 
     if all_blocks.shape[1] == 2:
-        motifs, inverse_indexes, counts = all_blocks.unique(
-            dim=0, return_inverse=True, return_counts=True
-        )
+        _, counts = all_blocks.unique(dim=0, return_counts=True)
 
         sort_idx = torch.argsort(counts, descending=True)
 

@@ -144,36 +144,52 @@ with PdfPages("weight_analysis_2.pdf") as pdf:
 # %%
 plt.close()
 # %%
-folder = "outputs/cifar10_mlp/0_fantastic-peridot-dingo-of-debate"
+folder = "outputs/cifar10_mlp/68_imported-succinct-capuchin-of-upgrade"  # s = 2
 one_run_many_epochs = [
     (
         f"{folder}/init.ckpt",
         2,
         "0.05 initialization",
     ),
-    (
-        f"{folder}/epoch-epoch=09.ckpt",
-        2,
-        "0.05 epoch=09",
-    ),
 ] + [
     (
         f"{folder}/epoch-epoch={epoch}.ckpt",
         2,
-        "0.05 epoch={epoch}",
+        f"0.05 epoch={epoch}",
     )
-    for epoch in range(19, 100, 10)
+    for epoch in range(49, 500, 50)
 ]
 # %%
 figures = []
 for d in one_run_many_epochs:
     figures += plot_weights(d)
-with PdfPages("weight_analysis_per_epoch.pdf") as pdf:
+
+
+# %%
+with PdfPages("weight_analysis_per_epoch_s=16.pdf") as pdf:
     for fig in figures:
         fig.save(pdf=pdf)
 # %%
-run_s128 = [("artifacts/model-26q8yc0n:v0/model.ckpt", 128, 0.3)][0]
-figures = plot_weights(run_s128)
-with PdfPages("weight_analysis_s=128.pdf") as pdf:
+folder = "outputs/cifar10_mlp/69_precise-emerald-wolverine-of-protection"  # s = 16
+one_run_many_epochs = [
+    (
+        f"{folder}/init.ckpt",
+        16,
+        "0.2 initialization",
+    ),
+] + [
+    (
+        f"{folder}/epoch-epoch={epoch}.ckpt",
+        16,
+        f"0.2 epoch={epoch}",
+    )
+    for epoch in range(49, 500, 50)
+]
+# %%
+figures = []
+for d in one_run_many_epochs:
+    figures += plot_weights(d)
+# %%
+with PdfPages("weight_analysis_per_epoch_s=16.pdf") as pdf:
     for fig in figures:
         fig.save(pdf=pdf)
