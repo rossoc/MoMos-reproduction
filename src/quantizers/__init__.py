@@ -22,7 +22,6 @@ from .momos import (
     quantize_momos,
     METHODS,
     available_methods,
-    MoMos,
     quantize,
 )
 
@@ -45,6 +44,5 @@ __all__ = [
     "quantize_momos",
     "METHODS",
     "available_methods",
-    "MoMos",
     "quantize",
 ]
