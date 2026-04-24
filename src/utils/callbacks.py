@@ -65,7 +65,7 @@ class QuantizationCallback(L.Callback):
 
     def on_train_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule):
         """Apply MoMos projection at the end of each training epoch."""
-        if self.method != "momos":
+        if self.method not in ["momos", "momos2d"]:
             return
 
         model = pl_module.model
@@ -83,21 +83,12 @@ class QuantizationCallback(L.Callback):
 
         stats = quantize(model, self.quant_cfg)
 
-        if stats is not None:
-            distortion = stats.get("distortion", 0.0)
-            changed = stats.get("num_changed_weights", 0)
-            q_time = stats.get("q_time", 0.0)
+        report = ""
+        for k, v in stats:
+            pl_module.log("quant/" + k, v, on_epoch=True, prog_bar=False)
+            report += f"{k}={v:.4f}"
 
-            pl_module.log("quant/distortion", distortion, on_epoch=True, prog_bar=False)
-            pl_module.log(
-                "quant/changed_weights", changed, on_epoch=True, prog_bar=False
-            )
-            pl_module.log("quant/q_time", q_time, on_epoch=True, prog_bar=False)
-
-            print(
-                f"MoMos applied: distortion={distortion:.4f}, "
-                f"changed_weights={changed}, time={q_time:.3f}s"
-            )
+        print("MoMos applied:", report)
 
     def on_validation_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule):
         """Compute and log quantization metrics after validation."""
@@ -186,7 +177,7 @@ def build_callbacks(
     quant_cfg = cfg.get("quantization", {})
     if quant_cfg.get("enabled", False):
         method = quant_cfg.get("method")
-        if method is not None and method.lower() in ("qat", "momos"):
+        if method is not None and method.lower() in ("qat", "momos", "momos2d"):
             # Build full quantization config dict for the quantizer modules
             full_quant_cfg = {
                 "method": method.lower(),
@@ -196,6 +187,26 @@ def build_callbacks(
                 full_quant_cfg["exclude_layers"] = quant_cfg.get("exclude_layers", [])
             elif method.lower() == "momos":
                 full_quant_cfg["s"] = int(quant_cfg["s"])
+                # Resolve k from direct value or capacity
+                if quant_cfg.get("k") is not None:
+                    full_quant_cfg["k"] = int(quant_cfg["k"])
+                elif quant_cfg.get("capacity") is not None:
+                    # Will be resolved by callback using model at epoch end
+                    full_quant_cfg["capacity"] = float(quant_cfg["capacity"])
+                    full_quant_cfg["k"] = None  # placeholder, resolved in callback
+                else:
+                    raise ValueError("MoMos requires either k or capacity in config")
+                full_quant_cfg["force_zero"] = bool(quant_cfg.get("force_zero", True))
+                if "chunk_size" in quant_cfg:
+                    full_quant_cfg["chunk_size"] = quant_cfg["chunk_size"]
+                if "chunk_progress" in quant_cfg:
+                    full_quant_cfg["chunk_progress"] = bool(quant_cfg["chunk_progress"])
+                if "chunk_progress_elements" in quant_cfg:
+                    full_quant_cfg["chunk_progress_elements"] = quant_cfg[
+                        "chunk_progress_elements"
+                    ]
+            elif method.lower() == "momos2d":
+                full_quant_cfg["cols"] = int(quant_cfg["rows"])
                 # Resolve k from direct value or capacity
                 if quant_cfg.get("k") is not None:
                     full_quant_cfg["k"] = int(quant_cfg["k"])

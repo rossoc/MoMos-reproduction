@@ -1,6 +1,5 @@
 """Core MoMos quantization algorithm, dispatcher, and MoMos class."""
 
-import time
 
 import torch
 
@@ -8,13 +7,10 @@ from .block_utils import (
     iter_trainable_params,
     tensor_to_blocks,
     blocks_to_tensor,
-    k_from_capacity,
     _resolve_chunk_size_blocks,
     _resolve_progress_every_elements,
     build_swap_motif,
 )
-from .fake_quant import quantize_qat
-
 
 def _nearest_motifs_chunked(
     blocks,
@@ -89,9 +85,6 @@ def _nearest_motifs_chunked(
                 while next_emit <= local_done:
                     next_emit += print_every
     return nearest
-
-
-import torch
 
 
 def _get_model_blocks(model, block_size):
@@ -251,41 +244,4 @@ def quantize_momos(model, quant_cfg):
         progress_every_elements=quant_cfg.get("chunk_progress_elements"),
         swapping_fn=swapping_function,
     )
-    return out
-
-
-METHODS = {
-    "qat": quantize_qat,
-    "momos": quantize_momos,
-}
-
-
-def available_methods():
-    """Return supported quantization method names."""
-    return sorted(METHODS.keys())
-
-
-def quantize(model, quant_cfg):
-    """Dispatch quantization by method and attach elapsed time.
-
-    Args:
-        model: Model to quantize.
-        quant_cfg: Quantization config dict with ``method`` key.
-
-    Returns:
-        Stats dict with ``method`` and ``q_time``, or ``None``.
-    """
-    if not quant_cfg:
-        return None
-
-    start = time.perf_counter()
-    method = str(quant_cfg.get("method", "qat")).lower()
-    fn = METHODS.get(method)
-    if fn is None:
-        raise ValueError(
-            f"Unsupported quantization method: {method}. Available: {', '.join(available_methods())}"
-        )
-    out = fn(model, quant_cfg) or {}
-    out["method"] = method
-    out["q_time"] = time.perf_counter() - start
     return out

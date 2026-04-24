@@ -8,6 +8,8 @@ from src.model import MLP
 
 
 def extract_blocks(model, block_size):
+    # differ from src.quantizers.momos._get_model_blocks because doesn't
+    # concatenate the blocks
     block_size = int(block_size)
     with torch.no_grad():
         layer_specs = []
