@@ -175,6 +175,8 @@ def momos(
             if swapping_fn is not None:
                 swapped = swapping_fn(nearest)
                 swapped_blocks = (swapped != nearest).sum().item()
+            else:
+                swapped_blocks = None
 
             quantized_blocks = motifs[nearest]
 

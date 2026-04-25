@@ -164,7 +164,7 @@ def build_callbacks(
     periodic_checkpoint = ModelCheckpoint(
         dirpath=checkpoint_dir,
         filename="epoch-{epoch:02d}",  # Includes epoch number in filename
-        every_n_epochs=10,
+        every_n_epochs=20,
         save_top_k=-1,  # Set to -1 to keep all periodic checkpoints
         # Or set to 3 to keep only the last 3 periodic ones
     )
@@ -214,6 +214,16 @@ def build_callbacks(
                     full_quant_cfg["chunk_progress_elements"] = quant_cfg[
                         "chunk_progress_elements"
                     ]
+                if (
+                    quant_cfg.get("from_percentile") is not None
+                    and quant_cfg.get("to_percentile") is not None
+                    and quant_cfg.get("swapping_probability") is not None
+                ):
+                    full_quant_cfg |= {
+                        "from_percentile": quant_cfg.get("from_percentile"),
+                        "to_percentile": quant_cfg.get("to_percentile"),
+                        "swapping_probability": quant_cfg.get("swapping_probability"),
+                    }
 
             callbacks.append(
                 QuantizationCallback(

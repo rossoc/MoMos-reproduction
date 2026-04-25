@@ -166,7 +166,7 @@ for d in one_run_many_epochs:
 
 
 # %%
-with PdfPages("weight_analysis_per_epoch_s=16.pdf") as pdf:
+with PdfPages("weight_analysis_per_epoch_s=2.pdf") as pdf:
     for fig in figures:
         fig.save(pdf=pdf)
 # %%
