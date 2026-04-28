@@ -153,7 +153,7 @@ class Figure:
 
     def plot_with_var(
         self,
-        data: dict[str, tuple[list[float], Any]],
+        data: dict[str, tuple[list[float], Any, Any]],  # Any stand for np.Array
         exp_name: str,
         logx=False,
         logy=False,
@@ -163,6 +163,7 @@ class Figure:
         alpha=0.12,
         style: Literal["sci", "scientific", "plain"] = "plain",
         markersize=5,
+        legend=True,
     ):
         """
         data is of the kind:
@@ -171,23 +172,26 @@ class Figure:
 
         """
         self._next_plot()
+        ax = self._ax()
         for i, (name, points) in enumerate(data.items()):
-            self._ax().plot(
+            ax.plot(
                 points[0],
-                points[1][0],
+                points[1],
                 symbol,
                 markersize=markersize,
                 label=name,
                 color=_COLORS[i % len(_COLORS)],
             )
-            self._ax().fill_between(
+            ax.fill_between(
                 points[0],
-                points[1][0] - points[1][1],
-                points[1][0] + points[1][1],
+                points[1] - points[2],
+                points[1] + points[2],
                 alpha=alpha,
             )
 
         self._default_settings(x_label, y_label, exp_name, style, logx, logy)
+        if legend:
+            ax.legend()
 
     def plot3D(
         self,
@@ -270,6 +274,8 @@ class Figure:
 
         if isinstance(data[0], pd.DataFrame):
             points = data[0].dropna().to_numpy().T
+        else:
+            points = data[0]
 
         ax1.plot(
             points[0][skip_n : len(points[0]) - pop_n],
@@ -291,6 +297,8 @@ class Figure:
         ax2 = ax1.twinx()
         if isinstance(data[1], pd.DataFrame):
             points = data[1].dropna().to_numpy().T
+        else:
+            points = data[0]
 
         ax2.plot(
             points[0][skip_n : len(points[0]) - pop_n],
@@ -309,6 +317,94 @@ class Figure:
 
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
+
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
+        ax2.legend([], [], title=exp_name, loc="lower left")
+
+    def plot_twinx_with_var(
+        self,
+        data: Any,
+        exp_name: str,
+        y1_label="Loss",
+        y2_label="Val. Loss",
+        logx=False,
+        logy=False,
+        x_label="Epochs",
+        symbol="-",
+        style: Literal["sci", "scientific", "plain"] = "plain",
+        markersize=5,
+        skip_n=0,
+        pop_n=0,
+        colors=_COLORS,
+        alpha=0.12,
+    ):
+        self._next_plot()
+
+        ax1 = self._ax()
+
+        if isinstance(data[0], pd.DataFrame):
+            points = data[0].dropna().to_numpy().T
+        else:
+            points = data[0]
+
+        ax1.plot(
+            points[0][skip_n : len(points[0]) - pop_n],
+            points[1][skip_n : len(points[0]) - pop_n],
+            symbol,
+            markersize=markersize,
+            label=y1_label,
+            color=colors[0],
+        )
+
+        ax1.fill_between(
+            points[0][skip_n : len(points[0]) - pop_n],
+            points[1][skip_n : len(points[0]) - pop_n]
+            - points[2][skip_n : len(points[0]) - pop_n],
+            points[1][skip_n : len(points[0]) - pop_n]
+            + points[2][skip_n : len(points[0]) - pop_n],
+            alpha=alpha,
+        )
+
+        ax1.grid(True)
+
+        if logx:
+            ax1.set_xscale("log")
+
+        if logy:
+            ax1.set_yscale("log")
+
+        ax2 = ax1.twinx()
+        if isinstance(data[1], pd.DataFrame):
+            points = data[1].dropna().to_numpy().T
+        else:
+            points = data[1]
+
+        ax2.plot(
+            points[0][skip_n : len(points[0]) - pop_n],
+            points[1][skip_n : len(points[0]) - pop_n],
+            symbol,
+            markersize=markersize,
+            label=y2_label,
+            color=colors[1],
+        )
+
+        ax2.fill_between(
+            points[0][skip_n : len(points[0]) - pop_n],
+            points[1][skip_n : len(points[0]) - pop_n]
+            - points[2][skip_n : len(points[0]) - pop_n],
+            points[1][skip_n : len(points[0]) - pop_n]
+            + points[2][skip_n : len(points[0]) - pop_n],
+            alpha=alpha,
+        )
+
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+
+        ax1.set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax1.set_ylabel(y1_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax1.ticklabel_format(axis="both", useMathText=True, useOffset=True, style=style)
+        ax2.set_ylabel(y2_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax2.ticklabel_format(axis="y", useMathText=True, useOffset=True, style=style)
 
         ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
         ax2.legend([], [], title=exp_name, loc="lower left")

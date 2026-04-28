@@ -52,12 +52,10 @@ def fetch_runs(
     project = project or getenv("WANDB_PROJECT", "")
 
     runs = api.runs(entity + "/" + project, lazy=False)
-    return _runs_clean_up(
-        runs, rename_dict, quant_metrics, momos_metrics, skip_n, pop_n
-    )
+    return runs_clean_up(runs, rename_dict, quant_metrics, momos_metrics, skip_n, pop_n)
 
 
-def _runs_clean_up(
+def runs_clean_up(
     runs: Runs, rename_dict, quant_metrics, momos_metrics, skip_n=0, pop_n=0
 ):
     results = []

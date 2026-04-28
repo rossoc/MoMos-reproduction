@@ -118,7 +118,7 @@ best_runs_artifacts = [
     "model-26q8yc0n:v0",  # 53
 ]
 api = wandb.Api()
-for r in best_runs_artifacts[-1:]:
+for r in best_runs_artifacts:
     artifact = api.artifact(
         f"danesinoo-university-of-copenhagen/momos-reproduction/{r}",
         type="model",
@@ -160,7 +160,7 @@ one_run_many_epochs = [
     (
         f"{folder}/epoch-epoch={epoch}.ckpt",
         2,
-        "0.05 epoch={epoch}",
+        f"0.05 epoch={epoch}",
     )
     for epoch in range(19, 100, 10)
 ]
