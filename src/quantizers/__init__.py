@@ -74,7 +74,7 @@ def quantize(model, quant_cfg):
         Stats dict with ``method`` and ``q_time``, or ``None``.
     """
     if not quant_cfg:
-        return None
+        return {}
 
     start = time.perf_counter()
     method = str(quant_cfg.get("method", "qat")).lower()

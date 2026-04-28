@@ -7,7 +7,7 @@ from lightning.pytorch.callbacks import (
     LearningRateMonitor,
 )
 
-from quantizers import quantize_qat, quantize
+from quantizers import quantize_qat, k_from_capacity, quantize
 from utils.metrics import compute_metrics
 
 
@@ -75,8 +75,6 @@ class QuantizationCallback(L.Callback):
             self.quant_cfg.get("k") is None
             and self.quant_cfg.get("capacity") is not None
         ):
-            from quantizers import k_from_capacity
-
             self.quant_cfg["k"] = k_from_capacity(
                 model, self.quant_cfg["s"], self.quant_cfg["capacity"]
             )
@@ -84,7 +82,7 @@ class QuantizationCallback(L.Callback):
         stats = quantize(model, self.quant_cfg)
 
         report = ""
-        for k, v in stats:
+        for k, v in stats.items():
             pl_module.log("quant/" + k, v, on_epoch=True, prog_bar=False)
             report += f"{k}={v:.4f}"
 
@@ -155,7 +153,7 @@ def build_callbacks(
     periodic_checkpoint = ModelCheckpoint(
         dirpath=checkpoint_dir,
         filename="epoch-{epoch:02d}",  # Includes epoch number in filename
-        every_n_epochs=10,
+        every_n_epochs=20,
         save_top_k=-1,  # Set to -1 to keep all periodic checkpoints
         # Or set to 3 to keep only the last 3 periodic ones
     )
@@ -205,6 +203,16 @@ def build_callbacks(
                     full_quant_cfg["chunk_progress_elements"] = quant_cfg[
                         "chunk_progress_elements"
                     ]
+                if (
+                    quant_cfg.get("from_percentile") is not None
+                    and quant_cfg.get("to_percentile") is not None
+                    and quant_cfg.get("swapping_probability") is not None
+                ):
+                    full_quant_cfg |= {
+                        "from_percentile": quant_cfg.get("from_percentile"),
+                        "to_percentile": quant_cfg.get("to_percentile"),
+                        "swapping_probability": quant_cfg.get("swapping_probability"),
+                    }
             elif method.lower() == "momos2d":
                 full_quant_cfg["cols"] = int(quant_cfg["rows"])
                 # Resolve k from direct value or capacity
@@ -225,6 +233,16 @@ def build_callbacks(
                     full_quant_cfg["chunk_progress_elements"] = quant_cfg[
                         "chunk_progress_elements"
                     ]
+                if (
+                    quant_cfg.get("from_percentile") is not None
+                    and quant_cfg.get("to_percentile") is not None
+                    and quant_cfg.get("swapping_probability") is not None
+                ):
+                    full_quant_cfg |= {
+                        "from_percentile": quant_cfg.get("from_percentile"),
+                        "to_percentile": quant_cfg.get("to_percentile"),
+                        "swapping_probability": quant_cfg.get("swapping_probability"),
+                    }
 
             callbacks.append(
                 QuantizationCallback(

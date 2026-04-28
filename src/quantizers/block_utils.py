@@ -146,43 +146,43 @@ def _resolve_progress_every_elements(
     return max(1, total_elements // n_reports)
 
 
-def build_swap_motif(from_percentiles, to_percentiles, probability):
-    """
-    Args:
-        from_percentiles (list[float]): List of percentiles (0.0-1.0) to swap FROM.
-        to_percentiles (list[float]): List of percentiles (0.0-1.0) to swap TO.
-        probability (float): Probability of a swap occurring for each identified element.
-    """
-    assert len(from_percentiles) == len(to_percentiles), (
-        "Percentile lists must match in length."
-    )
-
+def build_swap_motif(from_percentiles, to_percentiles, probability, window=0.01):
     def swap(idx):
-        # 1. Frequency Analysis
         motifs_idx, counts = idx.unique(return_counts=True)
+        # Sort so we can work in "percentile space"
         sorted_indices = torch.argsort(counts)
         motifs_sorted = motifs_idx[sorted_indices]
         num_unique = len(motifs_sorted)
 
-        # 2. Create the result tensor
         new_idx = idx.clone()
-
-        # 3. Probabilistic Mask
-        # We generate this once to ensure consistent application across all swaps
         prob_mask = torch.rand(idx.shape, device=idx.device) < probability
 
         for f_perc, t_perc in zip(from_percentiles, to_percentiles):
-            # Map percentile to specific rank index
-            f_rank = min(int(f_perc * num_unique), num_unique - 1)
-            t_rank = min(int(t_perc * num_unique), num_unique - 1)
+            # 1. Define the Rank Ranges
+            # e.g., if f_perc is 0.5 and window is 0.01, we look at 0.49 to 0.51
+            f_low = int(max(0, f_perc - window) * num_unique)
+            f_high = int(min(1.0, f_perc + window) * num_unique)
 
-            source_motif = motifs_sorted[f_rank]
-            target_motif = motifs_sorted[t_rank]
+            t_low = int(max(0, t_perc - window) * num_unique)
+            t_high = int(min(1.0, t_perc + window) * num_unique)
 
-            # 4. Perform Swap
-            # Match elements that are the source motif AND pass the probability check
-            swap_mask = (idx == source_motif) & prob_mask
-            new_idx[swap_mask] = target_motif
+            # 2. Get the set of motif IDs in these windows
+            source_motifs = motifs_sorted[f_low : f_high + 1]
+            target_motifs = motifs_sorted[t_low : t_high + 1]
+
+            if len(source_motifs) == 0 or len(target_motifs) == 0:
+                continue
+
+            # 3. Apply Swaps
+            # For each source motif in the range, pick a target motif to replace it with
+            for s_motif in source_motifs:
+                # Pick a random motif from the target window to swap into
+                # (You could also just pick the median of the target window)
+                t_idx = torch.randint(0, len(target_motifs), (1,)).item()
+                t_motif = target_motifs[t_idx]
+
+                swap_mask = (idx == s_motif) & prob_mask
+                new_idx[swap_mask] = t_motif
 
         return new_idx
 

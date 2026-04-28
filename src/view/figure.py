@@ -425,6 +425,7 @@ class Figure:
                 self.ax_flat = [self.ax]
 
         for ax in self.ax_flat:
+            ax.tick_params(axis="both", which="major", labelsize=self.fontsize)
             for line in ax.get_lines():
                 line.set_rasterized(True)
 

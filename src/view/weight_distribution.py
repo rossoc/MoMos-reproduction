@@ -66,7 +66,7 @@ def report_weight_distribution(
 ):
     res = []
     if scatter:
-        fig = Figure()
+        fig = Figure(fontsize=17)
         fig.plot(
             scatter,
             f"Motifs per layer for S={run[1]}, capacity={run[2]}",
@@ -78,7 +78,7 @@ def report_weight_distribution(
         res.append(fig)
 
     if frequencies:
-        fig = Figure()
+        fig = Figure(fontsize=17)
         fig.plot(
             frequencies,
             f"Motifs frequencies for S={run[1]}, capacity={run[2]}",
@@ -91,7 +91,7 @@ def report_weight_distribution(
         res.append(fig)
 
     if norms:
-        fig = Figure()
+        fig = Figure(fontsize=17)
         fig.plot(
             norms,
             f"Frequencies of Motifs' norms per layer for S={run[1]}, capacity={run[2]}",
@@ -133,7 +133,8 @@ def plot_weights(run):
     all_blocks = torch.cat(blocks, dim=0)
 
     if all_blocks.shape[1] == 2:
-        motifs, counts = all_blocks.unique(dim=0, return_counts=True)
+        _, counts = all_blocks.unique(dim=0, return_counts=True)
+
         sort_idx = torch.argsort(counts, descending=True)
         frequencies = {
             "All layers": (range(len(sort_idx)), counts[sort_idx] / len(counts))

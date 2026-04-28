@@ -1,6 +1,5 @@
 """Core MoMos quantization algorithm, dispatcher, and MoMos class."""
 
-
 import torch
 
 from .block_utils import (
@@ -11,6 +10,7 @@ from .block_utils import (
     _resolve_progress_every_elements,
     build_swap_motif,
 )
+
 
 def _nearest_motifs_chunked(
     blocks,
@@ -141,9 +141,8 @@ def _assign_blocks(
 
     swapped_count = 0
     if swapping_fn is not None:
-        original_nearest = nearest.clone()
-        nearest = swapping_fn(nearest)
-        swapped_count = (nearest != original_nearest).sum().item()
+        swapped = swapping_fn(nearest)
+        swapped_count = (nearest != swapped).sum().item()
 
     return nearest, swapped_count
 
