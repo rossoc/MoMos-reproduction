@@ -18,14 +18,12 @@
 
 # %%
 from src.view import fetch_runs
-from src.view.report import report
+from src.view.report import report, Report
 from src.view.weight_distribution import plot_weights
 
 import numpy as np
 import pickle
 import wandb
-from matplotlib.backends.backend_pdf import PdfPages
-import matplotlib.pyplot as plt
 
 # %%
 # Define cache file path
@@ -132,17 +130,11 @@ data = [
     ("artifacts/model-x63vszuv:v0/model.ckpt", 2, 0.2),  # run 22
 ]
 # %%
-figures = []
+figures = Report()
 for d in data:
-    figures += plot_weights(d)
+    figures.append_figures(plot_weights(d))
+figures.save("weight_analysis_2.pdf")
 
-with PdfPages("weight_analysis_2.pdf") as pdf:
-    for fig in figures:
-        fig.save(pdf=pdf)
-
-
-# %%
-plt.close()
 # %%
 folder = "outputs/cifar10_mlp/68_imported-succinct-capuchin-of-upgrade"  # s = 2
 one_run_many_epochs = [
@@ -160,15 +152,10 @@ one_run_many_epochs = [
     for epoch in range(49, 500, 50)
 ]
 # %%
-figures = []
+figures = Report()
 for d in one_run_many_epochs:
-    figures += plot_weights(d)
-
-
-# %%
-with PdfPages("weight_analysis_per_epoch_s=2.pdf") as pdf:
-    for fig in figures:
-        fig.save(pdf=pdf)
+    figures.append_figures(plot_weights(d))
+figures.save("weight_analysis_per_epoch_s=2.pdf")
 # %%
 folder = "outputs/cifar10_mlp/69_precise-emerald-wolverine-of-protection"  # s = 16
 one_run_many_epochs = [
@@ -186,10 +173,7 @@ one_run_many_epochs = [
     for epoch in range(49, 500, 50)
 ]
 # %%
-figures = []
+figures = Report()
 for d in one_run_many_epochs:
-    figures += plot_weights(d)
-# %%
-with PdfPages("weight_analysis_per_epoch_s=16.pdf") as pdf:
-    for fig in figures:
-        fig.save(pdf=pdf)
+    figures.append_figures(plot_weights(d))
+figures.save("weight_analysis_per_epoch_s=16.pdf")

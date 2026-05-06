@@ -187,6 +187,7 @@ class Figure:
                 points[1] - points[2],
                 points[1] + points[2],
                 alpha=alpha,
+                color=_COLORS[i % len(_COLORS)],
             )
 
         self._default_settings(x_label, y_label, exp_name, style, logx, logy)

@@ -187,3 +187,41 @@ def build_swap_motif(from_percentiles, to_percentiles, probability, window=0.01)
         return new_idx
 
     return swap
+
+
+
+# %%
+if __name__ == "__main__":
+    torch.manual_seed(0)
+
+    # 100 indices drawn from 4 motif IDs with skewed frequencies:
+    # motif 0 appears ~50x (high freq), motif 3 appears ~5x (low freq)
+    idx = torch.cat([
+        torch.zeros(50, dtype=torch.long),   # motif 0: most frequent  (top percentile)
+        torch.ones(25, dtype=torch.long),    # motif 1
+        torch.full((20,), 2, dtype=torch.long),  # motif 2
+        torch.full((5,), 3, dtype=torch.long),   # motif 3: least frequent (bottom percentile)
+    ])
+    idx = idx[torch.randperm(len(idx))]  # shuffle
+
+    # Swap low-frequency motifs (bottom ~10%) → high-frequency motifs (top ~10%)
+    swap = build_swap_motif(
+        from_percentiles=[0.0],   # bottom of rank distribution (least frequent)
+        to_percentiles=[1.0],     # top of rank distribution (most frequent)
+        probability=1.0,          # always swap when mask hits
+        window=0.1,
+    )
+
+    new_idx = swap(idx)
+
+    original_counts = {i: (idx == i).sum().item() for i in range(4)}
+    new_counts = {i: (new_idx == i).sum().item() for i in range(4)}
+
+    print("Original counts:", original_counts)
+    print("New counts:     ", new_counts)
+    # Expect: motif 3 (least frequent) count drops toward 0,
+    #         motif 0 (most frequent) count increases.
+    assert new_counts[3] < original_counts[3], "low-freq motif should be swapped out"
+    assert new_counts[0] > original_counts[0], "high-freq motif should gain indices"
+    print("Test passed.")
+

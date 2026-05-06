@@ -2,52 +2,59 @@
 # %%
 import pandas as pd
 import wandb
-from src.view import Figure
 import ast
 import numpy as np
-from matplotlib.backends.backend_pdf import PdfPages
-from src.view.fetch_log import extract_columns, merge_dfs
-
+from src.view import extract_columns, merge_dfs, Report
+from tqdm import tqdm
 # %%
 
-# api = wandb.Api()
-#
-# # Project is specified by <entity/project-name>
-# runs = api.runs("danesinoo-university-of-copenhagen/momos-reproduction")
-#
-# summary_list, config_list, name_list = [], [], []
-# for run in runs:
-#     # .summary contains the output keys/values for metrics like accuracy.
-#     #  We call ._json_dict to omit large files
-#     summary_list.append(run.summary._json_dict)
-#
-#     # .config contains the hyperparameters.
-#     #  We remove special values that start with _.
-#     config_list.append({k: v for k, v in run.config.items() if not k.startswith("_")})
-#
-#     # .name is the human-readable name of the run.
-#     name_list.append(run.name)
-#
-# runs_df = pd.DataFrame(
-#     {"summary": summary_list, "config": config_list, "name": name_list}
-# )
-#
-# runs_df.to_csv("project.csv")
+api = wandb.Api()
 
-runs_df = pd.read_csv("project.csv")
-figures = []
+# Project is specified by <entity/project-name>
+runs = api.runs("danesinoo-university-of-copenhagen/momos-reproduction")
+
+summary_list, config_list, name_list = [], [], []
+for run in tqdm(runs):
+    # .summary contains the output keys/values for metrics like accuracy.
+    #  We call ._json_dict to omit large files
+    summary_list.append(run.summary._json_dict)
+
+    # .config contains the hyperparameters.
+    #  We remove special values that start with _.
+    config_list.append({k: v for k, v in run.config.items() if not k.startswith("_")})
+
+    # .name is the human-readable name of the run.
+    name_list.append(run.name)
+
+runs_df = pd.DataFrame(
+    {"summary": summary_list, "config": config_list, "name": name_list}
+)
+
+runs_df.to_csv("project.csv")
+
+# runs_df = pd.read_csv("project.csv")
+report = Report()
 # %%
 
 percentile_runs = []
 for r in runs_df.iterrows():
-    config = ast.literal_eval(r[1]["config"])
-    if config.get("quantization", None) and config["quantization"].get(
-        "swapping_probability", None
+    try:
+        config = ast.literal_eval(r[1]["config"])
+    except Exception as _:
+        config = r[1]["config"]
+
+    if (
+        config.get("quantization", None)
+        and config["quantization"].get("swapping_probability", None)
+        and config.get("epochs", None) == 500
     ):
         run = r[1]
         quant_cfg = config["quantization"]
 
-        summary = ast.literal_eval(r[1]["summary"])
+        try:
+            summary = ast.literal_eval(r[1]["summary"])
+        except Exception as _:
+            summary = r[1]["summary"]
 
         if not summary.get("val/acc", None):
             continue
@@ -70,11 +77,14 @@ for r in runs_df.iterrows():
         )
 percentile_df = pd.DataFrame(percentile_runs)
 # %%
+
+
 from_percentile_df = (
     percentile_df.groupby(["from_percentile", "name1"])["val_acc"]
     .agg(["mean", "std"])
     .reset_index()
 )
+
 from_percentile_data = (
     from_percentile_df.groupby("name1")
     .apply(
@@ -87,7 +97,7 @@ from_percentile_data = (
     .to_dict()
 )
 # %%
-fig = Figure()
+fig = report.new_figure()
 fig.plot_with_var(
     from_percentile_data,
     "Percentile Ablations (avg. on swapping probability)",
@@ -96,7 +106,6 @@ fig.plot_with_var(
     symbol="o-",
 )
 fig.show()
-figures += [fig]
 # %%
 p_swap_df = (
     percentile_df.groupby(["p_swap", "name2"])["val_acc"]
@@ -114,7 +123,7 @@ p_swap_data = (
     )
     .to_dict()
 )
-fig = Figure()
+fig = report.new_figure()
 fig.plot_with_var(
     p_swap_data,
     "",
@@ -123,8 +132,6 @@ fig.plot_with_var(
     symbol="o-",
 )
 fig.show()
-figures += [fig]
-
 
 # %%
 p_from_df = (
@@ -143,7 +150,7 @@ p_from_data = (
     )
     .to_dict()
 )
-fig = Figure()
+fig = report.new_figure()
 fig.plot_with_var(
     p_from_data,
     "",
@@ -152,7 +159,6 @@ fig.plot_with_var(
     symbol="o-",
 )
 fig.show()
-figures += [fig]
 # %%
 hyperparams = ["from_percentile", "to_percentile", "p_swap"]
 grouped_swapping = (
@@ -162,12 +168,13 @@ grouped_swapping = (
 best_params = grouped_swapping.sort_values("mean", ascending=False)[:4][hyperparams]
 best_run_df = percentile_df.merge(best_params, on=hyperparams)
 # %%
+
 api = wandb.Api()
 runs = api.runs("danesinoo-university-of-copenhagen/momos-reproduction")
 
 best_runs = []
-for r in runs:
-    if r.name in best_run_df["run_name"].tolist():
+for r in tqdm(runs):
+    if r.name in best_run_df["run_name"].tolist() and r.summary["epoch"] == 500:
         best_runs.append(r)
 
 
@@ -182,7 +189,7 @@ MOMOS2D_METRICS = [
     "metrics/weight_l2",
     "metrics/sparsity",
     "quant/distortion",
-    "quant/changed_weights",
+    "quant/num_changed_weights",
     "val/loss",
     "val/acc",
     "train/loss",
@@ -193,8 +200,8 @@ MOMOS2D_METRICS = [
 # %%
 best_runs_data = []
 
-for run in best_runs:
-    history = run.history(samples=500)
+for run in tqdm(best_runs):
+    history = run.history(samples=50000)
     assert type(history) is pd.DataFrame
 
     try:
@@ -203,6 +210,7 @@ for run in best_runs:
         metrics += extract_columns(history, MOMOS2D_METRICS)
 
     except Exception as e:
+        print(run.name)
         print(history.columns)
         print(e)
         break
@@ -216,14 +224,11 @@ for run in best_runs:
         }
     )
 # %%
-grouped_runs
+best_runs_data
 # %%
-
-
 metrics = {}
 best_runs_summary = {}
 for r in grouped_runs.iterrows():
-    print(r[1]["run_name"])
     for run in best_runs_data:
         if run["name"] in r[1]["run_name"]:
             for metric in MOMOS2D_METRICS:
@@ -241,7 +246,6 @@ for r in grouped_runs.iterrows():
         f"Switch {r[1]['from_percentile']}th with {r[1]['to_percentile']}th w.p. {r[1]['p_swap']}"
     ] = result
 # %%
-fig = Figure("Training Overview", nrows=2, ncols=2)
 tr_overview = {
     "val/acc": "Validation Accuracy",
     "val/loss": "Validation Loss",
@@ -249,16 +253,15 @@ tr_overview = {
     "train/loss": "Training Loss",
 }
 
-for m, t in tr_overview.items():
-    data = {}
-    for k, v in best_runs_summary.items():
-        data[k] = (range(len(v[m][0])), v[m][0], v[m][1])
-    print(data)
-    fig.plot_with_var(data, "", y_label=t)
-fig.show()
-figures += [fig]
+report.training_overview(best_runs_summary, tr_overview, show=True)
 
-
+# for m, t in tr_overview.items():
+#     data = {}
+#     for k, v in best_runs_summary.items():
+#         data[k] = (range(len(v[m][0])), v[m][0], v[m][1])
+#     print(data)
+#     fig.plot_with_var(data, "", y_label=t)
+# fig.show()
 # %%
 
 metrics_overview = {
@@ -269,30 +272,22 @@ metrics_overview = {
     "metrics/weight_l2": "Weight L2",
     "metrics/sparsity": "Sparsity",
     "quant/distortion": "Quantization Distortion",
-    "quant/changed_weights": "Number of Changed Weights",
+    "quant/num_changed_weights": "Number of Changed Weights",
 }
 
-for m, t in metrics_overview.items():
-    fig = Figure(t + " vs Validation Loss", nrows=2, ncols=2)
+report.metrics_vs_accuracy(best_runs_summary, metrics_overview, True)
 
-    for sub_t, data in best_runs_summary.items():
-        d = (
-            (range(len(data[m][0])), data[m][0], data[m][1]),
-            (range(len(data["val/loss"][0])), data["val/loss"][0], data["val/loss"][1]),
-        )
-        fig.plot_twinx_with_var(d, sub_t, y1_label=t)
-        fig.show()
-
-    figures += [fig]
-
-
-# %%
-with PdfPages("percentile_ablations.pdf") as pdf:
-    for fig in figures:
-        fig.save(pdf=pdf)
-
-figures = []
-# %%
+# for m, t in metrics_overview.items():
+#     fig = report.new_figure(t + " vs Validation Loss", nrows=2, ncols=2)
+#
+#     for sub_t, data in best_runs_summary.items():
+#         d = (
+#             (range(len(data[m][0])), data[m][0], data[m][1]),
+#             (range(len(data["val/loss"][0])), data["val/loss"][0], data["val/loss"][1]),
+#         )
+#         fig.plot_twinx_with_var(d, sub_t, y1_label=t)
+#         fig.show()
 
 
 # %%
+report.save("percentile_ablations.pdf")

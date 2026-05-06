@@ -3,30 +3,73 @@
 # %%
 import pandas as pd
 import wandb
-from src.view import Figure
+from src.view import Report
 import ast
 import numpy as np
 import matplotlib.pyplot as plt
 from src.view.fetch_log import extract_columns, merge_dfs
 from matplotlib.backends.backend_pdf import PdfPages
+from tqdm import tqdm
 
 # %%
-runs_df = pd.read_csv("project.csv")
-figures = []
+api = wandb.Api()
+
+# Project is specified by <entity/project-name>
+runs = api.runs("danesinoo-university-of-copenhagen/momos-reproduction")
+
+summary_list, config_list, name_list = [], [], []
+for run in tqdm(runs):
+    summary_list.append(run.summary._json_dict)
+    config_list.append({k: v for k, v in run.config.items() if not k.startswith("_")})
+
+    name_list.append(run.name)
+
+runs_df = pd.DataFrame(
+    {"summary": summary_list, "config": config_list, "name": name_list}
+)
+
+runs_df.to_csv("project.csv")
+# runs_df = pd.read_csv("project.csv")
+
+
+# %%
+report = Report()
 # %%
 momos2d_runs = []
-for r in runs_df.iterrows():
-    config = ast.literal_eval(r[1]["config"])
+for i, r in enumerate(runs_df.iterrows()):
+    try:
+        config = ast.literal_eval(r[1]["config"])
+    except Exception as _:
+        config = r[1]["config"]
+
     if (
-        config.get("quantization", None)
-        and config["quantization"].get("method", None) == "momos2d"
+        not config.get("quantization", None)
+        or config["quantization"].get("method", None) != "momos2d"
     ):
+        continue
+    rows = config["quantization"]["rows"]
+    cols = config["quantization"]["cols"]
+
+    if (
+        (rows == 3 or cols == 3)
+        or (rows == 1 and cols == 1)
+        or (rows == 2 and cols in [2, 4])
+        or (rows == 8 and cols == 8)
+    ):
+        continue
+    try:
         momos2d_runs.append(r[1])
+    except Exception as e:
+        print(e)
 # %%
 momos2d_data = []
 for r in momos2d_runs:
-    summary = ast.literal_eval(r["summary"])
-    config = ast.literal_eval(r["config"])
+    try:
+        summary = ast.literal_eval(r["summary"])
+        config = ast.literal_eval(r["config"])
+    except Exception as _:
+        summary = r["summary"]
+        config = r["config"]
     name = "momos2d"
     name += f" rows: {config['quantization']['rows']}"
     name += f" cols: {config['quantization']['cols']}"
@@ -44,6 +87,9 @@ for r in momos2d_runs:
             "capacity": config["quantization"]["capacity"],
         }
     )
+# %%
+
+
 # %%
 momos2d_df = pd.DataFrame(momos2d_data)
 stats = momos2d_df.groupby("name")[
@@ -73,42 +119,41 @@ result_dict = (
     )
     .to_dict()
 )
+
 # %%
-fig = Figure()
+fig = report.new_figure()
 fig.plot_with_var(
-    result_dict, "", symbol="o-", x_label="Capacity", y_label="Validation Accuracy"
+    result_dict,
+    "",
+    symbol="o-",
+    x_label="Capacity",
+    y_label="Validation Accuracy",
+    logx=True,
 )
 fig.show()
-figures += [fig]
 # %%
 
 plt.close()
 # %%
 
-best_params = [(2, 1, 0.1), (2, 1, 0.05), (2, 1, 0.01), (2, 2, 0.1)]
+best_params = [(2, 1, 0.001), (1, 4, 0.001), (8, 1, 0.001), (1, 8, 0.001)]
 momos2d_best = []
 for params in best_params:
-    momos2d_best.append(
-        momos2d_df[
-            (momos2d_df["rows"] == params[0])
-            & (momos2d_df["cols"] == params[1])
-            & (momos2d_df["capacity"] == params[2])
-        ]
-    )
-momos2d_best = pd.concat(momos2d_best, ignore_index=True)
+    for s in [42, 123, 777, 482, 291]:
+        momos2d_best.append(f"momos_2d_c{params[1]}_r{params[0]}_cap{params[2]}_s{s}")
 
 
 # %%
+momos2d_best
 # %%
 api = wandb.Api()
 runs = api.runs("danesinoo-university-of-copenhagen/momos-reproduction")
 
 momos2d_best_runs = []
-for r in runs:
-    if r.name in momos2d_best["run_name"].tolist():
+for r in tqdm(runs):
+    if r.name in momos2d_best:
         momos2d_best_runs.append(r)
 # %%
-
 MOMOS2D_METRICS = [
     "metrics/bdm_complexity",
     "metrics/gzip_compression_rate",
@@ -123,14 +168,15 @@ MOMOS2D_METRICS = [
     "train/loss",
     "train/acc",
 ]
-
-
 # %%
 momos2d_best_runs_data = []
 
-for run in momos2d_best_runs:
+for run in tqdm(momos2d_best_runs):
     history = run.history(samples=500)
     assert type(history) is pd.DataFrame
+
+    if history.empty:
+        continue
 
     try:
         metrics = []
@@ -192,24 +238,17 @@ for params in best_params:
     ] = result
 # %%
 
-fig = Figure("Training Overview", nrows=2, ncols=2)
 tr_overview = {
     "val/acc": "Validation Accuracy",
     "val/loss": "Validation Loss",
     "train/acc": "Training Accuracy",
     "train/loss": "Training Loss",
 }
-
-for m, t in tr_overview.items():
-    data = {}
-    for k, v in best_runs_summary.items():
-        data[k] = (range(len(v[m][0])), v[m][0], v[m][1])
-    print(data)
-    fig.plot_with_var(data, "", y_label=t)
-fig.show()
-figures += [fig]
+report.training_overview(best_runs_summary, tr_overview, show=True)
 
 
+# %%
+best_runs_summary
 # %%
 metrics_overview = {
     "metrics/bdm_complexity": "BDM Complexity",
@@ -222,20 +261,6 @@ metrics_overview = {
     "quant/num_changed_weights": "Number of Changed Weights",
 }
 
-for m, t in metrics_overview.items():
-    fig = Figure(t + " vs Validation Loss", nrows=2, ncols=2)
-
-    for sub_t, data in best_runs_summary.items():
-        d = (
-            (range(len(data[m][0])), data[m][0], data[m][1]),
-            (range(len(data["val/loss"][0])), data["val/loss"][0], data["val/loss"][1]),
-        )
-        fig.plot_twinx_with_var(d, sub_t, y1_label=t)
-        fig.show()
-
-    figures += [fig]
+report.metrics_vs_accuracy(best_runs_summary, metrics_overview, True)
 # %%
-with PdfPages("momos2_overview.pdf") as pdf:
-    for fig in figures:
-        fig.save(pdf=pdf)
-# %%
+report.save("momos2_overview.pdf")

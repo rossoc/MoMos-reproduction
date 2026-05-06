@@ -8,6 +8,20 @@ import pandas as pd
 
 load_dotenv()
 
+MOMOS2D_METRICS = [
+    "metrics/bdm_complexity",
+    "metrics/gzip_compression_rate",
+    "metrics/bz2_compression_rate",
+    "metrics/lzma_compression_rate",
+    "metrics/weight_l2",
+    "metrics/sparsity",
+    "quant/distortion",
+    "quant/changed_weights",
+    "val/loss",
+    "val/acc",
+    "train/loss",
+    "train/acc",
+]
 
 QUANT_METRICS = [
     "metrics/bdm_complexity",
@@ -27,8 +41,11 @@ MOMOS_METRICS = [
     "metrics/sparsity",
     "quant/distortion",
     "quant/changed_weights",
+    "val/loss",
+    "val/acc",
+    "train/loss",
+    "train/acc",
 ]
-
 
 ORIGINAL_FIELDS_MAPPING = {
     "val_loss": "val/loss",
@@ -121,4 +138,35 @@ def merge_dfs(dfs):
 
     for df in dfs[1:]:
         res = pd.merge(res, df, how="outer")
+    return res
+
+
+def fetch_runs_by_method(method, project=None):
+    api = wandb.Api()
+    entity = getenv("WANDB_ENTITY", "")
+    project = project or getenv("WANDB_PROJECT", "")
+    runs = api.runs(entity + "/" + project)
+
+    res = []
+    for run in runs:
+        if run.config.get("quantization", None) and method == "standard":
+            res.append(
+                {
+                    "summary": run.summary._json_dict,
+                    "config": run.config.items(),
+                    "name": run.name,
+                }
+            )
+
+        elif (
+            run.config.get("quantization", None)
+            and run.config.get("method", None) == method
+        ):
+            res.append(
+                {
+                    "summary": run.summary._json_dict,
+                    "config": run.config.items(),
+                    "name": run.name,
+                }
+            )
     return res

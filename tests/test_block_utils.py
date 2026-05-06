@@ -367,5 +367,102 @@ class TestResolveProgressEveryElements(unittest.TestCase):
         self.assertEqual(result, 1)
 
 
+class TestBuildSwapMotif(unittest.TestCase):
+    def _skewed_idx(self):
+        """4 motifs: 0→50, 1→25, 2→20, 3→5. Sorted by freq asc: [3, 2, 1, 0]."""
+        return torch.cat([
+            torch.zeros(50, dtype=torch.long),
+            torch.ones(25, dtype=torch.long),
+            torch.full((20,), 2, dtype=torch.long),
+            torch.full((5,), 3, dtype=torch.long),
+        ])
+
+    def test_returns_callable(self):
+        swap = block_utils.build_swap_motif([0.0], [1.0], probability=1.0)
+        self.assertTrue(callable(swap))
+
+    def test_probability_zero_no_change(self):
+        idx = self._skewed_idx()
+        swap = block_utils.build_swap_motif([0.0], [1.0], probability=0.0, window=0.1)
+        new_idx = swap(idx)
+        self.assertTrue(torch.equal(new_idx, idx))
+
+    def test_probability_one_source_fully_replaced(self):
+        # rank asc: [3,2,1,0]; from perc 0.0 → motif 3; to perc 1.0 → motif 0
+        idx = self._skewed_idx()
+        swap = block_utils.build_swap_motif([0.0], [1.0], probability=1.0, window=0.1)
+        new_idx = swap(idx)
+        self.assertEqual((new_idx == 3).sum().item(), 0)
+
+    def test_probability_one_target_absorbs_source_count(self):
+        idx = self._skewed_idx()
+        swap = block_utils.build_swap_motif([0.0], [1.0], probability=1.0, window=0.1)
+        new_idx = swap(idx)
+        # motif 0 had 50; gains the 5 from motif 3
+        self.assertEqual((new_idx == 0).sum().item(), 55)
+
+    def test_output_shape_unchanged(self):
+        idx = self._skewed_idx()
+        swap = block_utils.build_swap_motif([0.0], [1.0], probability=1.0, window=0.1)
+        self.assertEqual(swap(idx).shape, idx.shape)
+
+    def test_input_tensor_not_mutated(self):
+        idx = self._skewed_idx()
+        original = idx.clone()
+        block_utils.build_swap_motif([0.0], [1.0], probability=1.0, window=0.1)(idx)
+        self.assertTrue(torch.equal(idx, original))
+
+    def test_output_contains_only_valid_motif_ids(self):
+        idx = self._skewed_idx()
+        valid_ids = set(idx.unique().tolist())
+        swap = block_utils.build_swap_motif([0.0], [1.0], probability=1.0, window=0.1)
+        self.assertTrue(set(swap(idx).unique().tolist()).issubset(valid_ids))
+
+    def test_unaffected_motifs_count_unchanged(self):
+        # Only motif 3 (bottom percentile) is in the source window; 1 and 2 stay intact
+        idx = self._skewed_idx()
+        swap = block_utils.build_swap_motif([0.0], [1.0], probability=1.0, window=0.1)
+        new_idx = swap(idx)
+        self.assertEqual((new_idx == 1).sum().item(), 25)
+        self.assertEqual((new_idx == 2).sum().item(), 20)
+
+    def test_partial_probability_reduces_source_count(self):
+        torch.manual_seed(0)
+        idx = self._skewed_idx()
+        original_count = (idx == 3).sum().item()
+        swap = block_utils.build_swap_motif([0.0], [1.0], probability=0.5, window=0.1)
+        new_idx = swap(idx)
+        self.assertLess((new_idx == 3).sum().item(), original_count)
+
+    def test_single_unique_motif_is_noop(self):
+        # Source and target are the same motif — output must equal input
+        idx = torch.zeros(20, dtype=torch.long)
+        swap = block_utils.build_swap_motif([0.0], [1.0], probability=1.0, window=0.5)
+        self.assertTrue(torch.equal(swap(idx), idx))
+
+    def test_multiple_swap_pairs_both_applied(self):
+        # pair 1 window hits motif 3 (rank 0); pair 2 window hits motifs 3 and 2 (ranks 0-1)
+        # With prob=1 both low-freq motifs should disappear
+        idx = self._skewed_idx()
+        swap = block_utils.build_swap_motif(
+            from_percentiles=[0.0, 0.25],
+            to_percentiles=[1.0, 1.0],
+            probability=1.0,
+            window=0.1,
+        )
+        new_idx = swap(idx)
+        self.assertEqual((new_idx == 3).sum().item(), 0)
+        self.assertEqual((new_idx == 2).sum().item(), 0)
+
+    def test_swap_is_deterministic_with_fixed_seed(self):
+        idx = self._skewed_idx()
+        swap = block_utils.build_swap_motif([0.0], [1.0], probability=0.7, window=0.1)
+        torch.manual_seed(99)
+        result_a = swap(idx).clone()
+        torch.manual_seed(99)
+        result_b = swap(idx).clone()
+        self.assertTrue(torch.equal(result_a, result_b))
+
+
 if __name__ == "__main__":
     unittest.main()
