@@ -83,6 +83,8 @@ class QuantizationCallback(L.Callback):
 
         report = ""
         for k, v in stats.items():
+            if k in ["motif_counts", "method"]:
+                continue
             pl_module.log("quant/" + k, v, on_epoch=True, prog_bar=False)
             report += f"{k}={v:.4f}"
 
@@ -150,14 +152,15 @@ def build_callbacks(
     )
     callbacks.append(checkpoint_callback)
 
-    periodic_checkpoint = ModelCheckpoint(
-        dirpath=checkpoint_dir,
-        filename="epoch-{epoch:02d}",  # Includes epoch number in filename
-        every_n_epochs=20,
-        save_top_k=-1,  # Set to -1 to keep all periodic checkpoints
-        # Or set to 3 to keep only the last 3 periodic ones
-    )
-    callbacks.append(periodic_checkpoint)
+    if cfg.get("periodic_checkpoint", None):
+        periodic_checkpoint = ModelCheckpoint(
+            dirpath=checkpoint_dir,
+            filename="epoch-{epoch:02d}",  # Includes epoch number in filename
+            every_n_epochs=20,
+            save_top_k=-1,  # Set to -1 to keep all periodic checkpoints
+            # Or set to 3 to keep only the last 3 periodic ones
+        )
+        callbacks.append(periodic_checkpoint)
 
     # Early stopping (optional)
     patience = cfg.get("patience")
@@ -214,7 +217,9 @@ def build_callbacks(
                         "swapping_probability": quant_cfg.get("swapping_probability"),
                     }
             elif method.lower() == "momos2d":
-                full_quant_cfg["cols"] = int(quant_cfg["rows"])
+                full_quant_cfg["rows"] = int(quant_cfg["rows"])
+                full_quant_cfg["cols"] = int(quant_cfg["cols"])
+                full_quant_cfg["s"] = int(quant_cfg["rows"]) * int(quant_cfg["cols"])
                 # Resolve k from direct value or capacity
                 if quant_cfg.get("k") is not None:
                     full_quant_cfg["k"] = int(quant_cfg["k"])

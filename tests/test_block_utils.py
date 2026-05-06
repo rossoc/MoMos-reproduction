@@ -3,7 +3,7 @@ import unittest
 import torch
 import torch.nn as nn
 
-import quantizers
+import src.quantizers as quantizers
 import src.quantizers.block_utils as block_utils
 
 

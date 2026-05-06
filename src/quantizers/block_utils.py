@@ -160,17 +160,19 @@ def build_swap_motif(from_percentiles, to_percentiles, probability, window=0.01)
         for f_perc, t_perc in zip(from_percentiles, to_percentiles):
             # 1. Define the Rank Ranges
             # e.g., if f_perc is 0.5 and window is 0.01, we look at 0.49 to 0.51
-            f_low = int(max(0, f_perc - window) * num_unique)
-            f_high = int(min(1.0, f_perc + window) * num_unique)
+            # Replace your range definitions with this:
+            f_low = int(round(max(0, f_perc - window) * (num_unique - 1)))
+            f_high = int(round(min(1.0, f_perc + window) * (num_unique - 1)))
 
-            t_low = int(max(0, t_perc - window) * num_unique)
-            t_high = int(min(1.0, t_perc + window) * num_unique)
+            t_low = int(round(max(0, t_perc - window) * (num_unique - 1)))
+            t_high = int(round(min(1.0, t_perc + window) * (num_unique - 1)))
 
-            # 2. Get the set of motif IDs in these windows
+            # Then slice using:
             source_motifs = motifs_sorted[f_low : f_high + 1]
             target_motifs = motifs_sorted[t_low : t_high + 1]
 
             if len(source_motifs) == 0 or len(target_motifs) == 0:
+                print("Error!!!")
                 continue
 
             # 3. Apply Swaps

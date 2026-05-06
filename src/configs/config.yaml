@@ -22,6 +22,8 @@ devices: 1
 log_dir: ./outputs
 prefix: ""
 
+periodic_checkpoint: null
+
 # Hydra output configuration
 hydra:
   output_subdir: null
@@ -38,7 +40,7 @@ wandb:
   entity: null
   name: null
   tags: []
-  log_model: all
+  log_model: true
 
 # Quantization
 quantization:
@@ -53,6 +55,8 @@ quantization:
   from_percentile: [0.5] # change 50th percentile
   to_percentile: [0.99] # into 99th percentile
   swapping_probability: null # e.g. 0.5 otherwise nothing is applied
+  rows: null
+  cols: null
 
 # Metrics
 metrics: []  # e.g., [sparsity, l2, gzip, bz2, lzma, bdm]

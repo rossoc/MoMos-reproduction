@@ -11,6 +11,11 @@ def tensor2D_to_blocks(tensor, rows, cols):
         raise ValueError(f"rows and cols must be > 0, ({rows}, {cols})")
 
     original_shape = tensor.shape
+    if len(original_shape) < 2:
+        # Handle 1D case specifically or unsqueeze it to 2D
+        tensor = tensor.unsqueeze(0)
+        original_shape = tensor.shape
+
     tensor_view = tensor.view(-1, original_shape[-2], original_shape[-1])
     batch, orig_h, orig_w = tensor_view.shape
 
@@ -46,6 +51,9 @@ def blocks_to_tensor2D(blocks, original_shape, rows, cols):
 
     out = out.reshape(batch, padded_h, padded_w)
     out = out[:, :orig_h, :orig_w]
+
+    if original_shape[0] == 1:
+        return out.view(-1)
 
     return out.view(original_shape)
 
