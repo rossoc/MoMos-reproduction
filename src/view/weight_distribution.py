@@ -43,7 +43,7 @@ def scatter_data(blocks, layers_specs, name):
     scatter_per_layer = {}
     scatter_motifs_per_layer = {}
 
-    for i, (b, s) in enumerate(zip(blocks, layers_specs)):
+    for i, (b, _) in enumerate(zip(blocks, layers_specs)):
         uniques_motifs_l = b.unique(dim=0)
         scatter_per_layer[f"Layer {i + 1}"] = uniques_motifs_l.T
         if i % 2 == 0 and i < 7:
@@ -63,7 +63,7 @@ def report_weight_distribution(
     norms=None,
     scatter=None,
     scatter_layer=None,
-):
+) -> list[Figure]:
     res = []
     if scatter:
         fig = Figure(fontsize=17)
@@ -125,7 +125,7 @@ def report_weight_distribution(
     return res
 
 
-def plot_weights(run):
+def plot_weights(run) -> list[Figure]:
     model = load_model(run[0])
 
     blocks, layers_specs = extract_blocks(model, run[1])
@@ -175,6 +175,8 @@ def plot_weights(run):
         )
 
         return figures
+    else:
+        raise ValueError("What did you mean to do? In PlotWeight, shape is < 2")
 
 
 def plot_blocks(run, blocks, layers_specs):
@@ -186,7 +188,7 @@ def scatter_data_numpy(blocks, layers_specs, capacity):
     scatter_per_layer = {}
     scatter_motifs_per_layer = {}
 
-    for i, (b, s) in enumerate(zip(blocks, layers_specs)):
+    for i, (b, _) in enumerate(zip(blocks, layers_specs)):
         uniques_motifs_l = np.unique(b, axis=1)
         scatter_per_layer[f"Layer {i + 1}"] = uniques_motifs_l.T
         if i % 2 == 0 and i < 7:

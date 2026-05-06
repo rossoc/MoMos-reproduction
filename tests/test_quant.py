@@ -6,7 +6,9 @@ import torch.nn as nn
 import torch.nn.utils.parametrize as parametrize
 
 
-import quantizers  # noqa: E402
+import src.quantizers as quantizers
+
+from src.quantizers.momos import _nearest_motifs_chunked
 
 
 class VectorModel(nn.Module):
@@ -93,7 +95,7 @@ class TestMoMosAndQAT(unittest.TestCase):
         )
         motifs = torch.tensor([[1.0, 2.0], [9.0, 10.0]], dtype=torch.float32)
 
-        chunked = quantizers._nearest_motifs_chunked(blocks, motifs, chunk_size=1e-6)
+        chunked = _nearest_motifs_chunked(blocks, motifs, chunk_size=1e-6)
         direct = torch.cdist(blocks, motifs).argmin(dim=1)
         self.assertTrue(torch.equal(chunked, direct))
 

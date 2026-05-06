@@ -38,7 +38,7 @@ def _nearest_motifs_chunked(
     n_blocks = int(blocks.size(0))
     block_size = int(blocks.size(1)) if blocks.dim() > 1 else 1
     n_motifs = int(motifs.size(0))
-    chunk_size = chunk_size or 4096
+    chunk_size = chunk_size or 1024
     chunk = _resolve_chunk_size_blocks(
         n_blocks,
         n_motifs,
