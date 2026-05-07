@@ -13,7 +13,7 @@ Default G-function parameters are fitted on a v20 CIFAR-10/MLP checkpoint.
 import torch
 from .block_utils import build_swap_motif
 from .momos import _assign_blocks
-from .momos2d import tensor2D_to_blocks, blocks_to_tensor2D, _get_model_blocks2D
+from .momos2d import blocks_to_tensor2D, _get_model_blocks2D
 
 # ---------------------------------------------------------------------------
 # G(i) functions: index → weight magnitude
@@ -22,12 +22,16 @@ from .momos2d import tensor2D_to_blocks, blocks_to_tensor2D, _get_model_blocks2D
 _EXP_DEFAULTS = dict(A=9.10e-3, B=6.86e-3, C=1.084)
 
 
-def g_exp(i: torch.Tensor, A: float = 9.10e-3, B: float = 6.86e-3, C: float = 1.084) -> torch.Tensor:
+def g_exp(
+    i: torch.Tensor, A: float = 9.10e-3, B: float = 6.86e-3, C: float = 1.084
+) -> torch.Tensor:
     """3-parameter exponential magnitude codebook: G(i) = A·(exp(B·i^C)−1)."""
     return A * (torch.exp(B * i.pow(C)) - 1.0)
 
 
-def g_exp_inverse(w: torch.Tensor, A: float = 9.10e-3, B: float = 6.86e-3, C: float = 1.084) -> torch.Tensor:
+def g_exp_inverse(
+    w: torch.Tensor, A: float = 9.10e-3, B: float = 6.86e-3, C: float = 1.084
+) -> torch.Tensor:
     """Analytic inverse of g_exp: maps |w| → codebook index i."""
     return (torch.log(w.abs() / A + 1.0) / B).pow(1.0 / C)
 
@@ -46,7 +50,10 @@ def g_sr_rational(i: torch.Tensor) -> torch.Tensor:
 # Codebook precomputation (256 entries)
 # ---------------------------------------------------------------------------
 
-def build_codebook(init_mode: str, A: float = 9.10e-3, B: float = 6.86e-3, C: float = 1.084) -> torch.Tensor:
+
+def build_codebook(
+    init_mode: str, A: float = 9.10e-3, B: float = 6.86e-3, C: float = 1.084
+) -> torch.Tensor:
     """Return the 256-entry magnitude codebook for the given init_mode."""
     i = torch.arange(256, dtype=torch.float32)
     if init_mode == "sr_rational":
@@ -57,6 +64,7 @@ def build_codebook(init_mode: str, A: float = 9.10e-3, B: float = 6.86e-3, C: fl
 # ---------------------------------------------------------------------------
 # Static motif initialisation
 # ---------------------------------------------------------------------------
+
 
 def _initialize_motifs_static(
     k_eff: int,
@@ -98,6 +106,7 @@ def _initialize_motifs_static(
 # ---------------------------------------------------------------------------
 # Core algorithm
 # ---------------------------------------------------------------------------
+
 
 def static_momos2D(
     model,
@@ -197,13 +206,13 @@ def static_momos2D(
         "num_changed_weights": int(changed_weights),
         "motif_counts": motif_counts,
         "swapped_blocks": swapped_blocks,
-        "init_mode": init_mode,
     }
 
 
 # ---------------------------------------------------------------------------
 # Config dispatcher
 # ---------------------------------------------------------------------------
+
 
 def quantize_static_momos2D(model, quant_cfg: dict) -> dict:
     """Apply one static MoMos 2D projection step from a config dict."""
@@ -212,7 +221,9 @@ def quantize_static_momos2D(model, quant_cfg: dict) -> dict:
     probability = quant_cfg.get("swapping_probability", None)
 
     if from_percentile and to_percentile and probability:
-        swapping_function = build_swap_motif(from_percentile, to_percentile, probability)
+        swapping_function = build_swap_motif(
+            from_percentile, to_percentile, probability
+        )
     else:
         swapping_function = None
 
