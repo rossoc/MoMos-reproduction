@@ -25,6 +25,7 @@ from .momos import (
 )
 
 from .momos2d import quantize_momos2D, momos2D
+from .static_momos import quantize_static_momos2D, static_momos2D, g_exp, g_exp_inverse, g_sr_rational, build_codebook
 
 __all__ = [
     # Fake quantization
@@ -49,12 +50,20 @@ __all__ = [
     # MoMos2D core
     "momos2D",
     "quantize_momos2D",
+    # Static MoMos2D (G-function initialised)
+    "static_momos2D",
+    "quantize_static_momos2D",
+    "g_exp",
+    "g_exp_inverse",
+    "g_sr_rational",
+    "build_codebook",
 ]
 
 METHODS = {
     "qat": quantize_qat,
     "momos": quantize_momos,
     "momos2d": quantize_momos2D,
+    "static_momos2d": quantize_static_momos2D,
 }
 
 

@@ -65,7 +65,7 @@ class QuantizationCallback(L.Callback):
 
     def on_train_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule):
         """Apply MoMos projection at the end of each training epoch."""
-        if self.method not in ["momos", "momos2d"]:
+        if self.method not in ["momos", "momos2d", "static_momos2d"]:
             return
 
         model = pl_module.model
@@ -178,7 +178,7 @@ def build_callbacks(
     quant_cfg = cfg.get("quantization", {})
     if quant_cfg.get("enabled", False):
         method = quant_cfg.get("method")
-        if method is not None and method.lower() in ("qat", "momos", "momos2d"):
+        if method is not None and method.lower() in ("qat", "momos", "momos2d", "static_momos2d"):
             # Build full quantization config dict for the quantizer modules
             full_quant_cfg = {
                 "method": method.lower(),
@@ -238,6 +238,42 @@ def build_callbacks(
                     full_quant_cfg["chunk_progress_elements"] = quant_cfg[
                         "chunk_progress_elements"
                     ]
+                if (
+                    quant_cfg.get("from_percentile") is not None
+                    and quant_cfg.get("to_percentile") is not None
+                    and quant_cfg.get("swapping_probability") is not None
+                ):
+                    full_quant_cfg |= {
+                        "from_percentile": quant_cfg.get("from_percentile"),
+                        "to_percentile": quant_cfg.get("to_percentile"),
+                        "swapping_probability": quant_cfg.get("swapping_probability"),
+                    }
+
+            elif method.lower() == "static_momos2d":
+                full_quant_cfg["rows"] = int(quant_cfg["rows"])
+                full_quant_cfg["cols"] = int(quant_cfg["cols"])
+                full_quant_cfg["s"] = int(quant_cfg["rows"]) * int(quant_cfg["cols"])
+                if quant_cfg.get("k") is not None:
+                    full_quant_cfg["k"] = int(quant_cfg["k"])
+                elif quant_cfg.get("capacity") is not None:
+                    full_quant_cfg["capacity"] = float(quant_cfg["capacity"])
+                    full_quant_cfg["k"] = None
+                else:
+                    raise ValueError("static_momos2d requires either k or capacity in config")
+                full_quant_cfg["init_mode"] = str(quant_cfg.get("init_mode", "sr_rational"))
+                if quant_cfg.get("exp_A") is not None:
+                    full_quant_cfg["exp_A"] = float(quant_cfg["exp_A"])
+                if quant_cfg.get("exp_B") is not None:
+                    full_quant_cfg["exp_B"] = float(quant_cfg["exp_B"])
+                if quant_cfg.get("exp_C") is not None:
+                    full_quant_cfg["exp_C"] = float(quant_cfg["exp_C"])
+                full_quant_cfg["force_zero"] = bool(quant_cfg.get("force_zero", True))
+                if "chunk_size" in quant_cfg:
+                    full_quant_cfg["chunk_size"] = quant_cfg["chunk_size"]
+                if "chunk_progress" in quant_cfg:
+                    full_quant_cfg["chunk_progress"] = bool(quant_cfg["chunk_progress"])
+                if "chunk_progress_elements" in quant_cfg:
+                    full_quant_cfg["chunk_progress_elements"] = quant_cfg["chunk_progress_elements"]
                 if (
                     quant_cfg.get("from_percentile") is not None
                     and quant_cfg.get("to_percentile") is not None
