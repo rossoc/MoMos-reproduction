@@ -3,13 +3,12 @@
 # %%
 import pandas as pd
 import wandb
-from src.view import Report
+from src.view import Report, extract_columns, merge_dfs
+from src.view.weight_distribution import plot_weights_2d
 import ast
 import numpy as np
-import matplotlib.pyplot as plt
-from src.view.fetch_log import extract_columns, merge_dfs
-from matplotlib.backends.backend_pdf import PdfPages
-from tqdm import tqdm
+import os
+from tqdm import tqdm, trange
 
 # %%
 api = wandb.Api()
@@ -132,10 +131,6 @@ fig.plot_with_var(
 )
 fig.show()
 # %%
-
-plt.close()
-# %%
-
 best_params = [(2, 1, 0.001), (1, 4, 0.001), (8, 1, 0.001), (1, 8, 0.001)]
 momos2d_best = []
 for params in best_params:
@@ -264,3 +259,33 @@ metrics_overview = {
 report.metrics_vs_accuracy(best_runs_summary, metrics_overview, True)
 # %%
 report.save("momos2_overview.pdf")
+# %% [markdown]
+# # Weight Analysis
+# api = wandb.Api()
+runs = [
+    "model-87qv0k7c",
+    # "model-hvgwcsxv",
+    # "model-nlsys31m",
+    # "model-sk1uogwk",
+]
+_config_cache = {}
+for run_name in runs:
+    report = Report()
+    rows = cols = cap = None
+    for i in trange(1, 21):
+        artifact = api.artifact(
+            f"danesinoo-university-of-copenhagen/momos-collapse/{run_name}:v{i}"
+        )
+        if run_name not in _config_cache:
+            q_cfg = artifact.logged_by().config.get("quantization", {})
+            _config_cache[run_name] = q_cfg
+        q_cfg = _config_cache[run_name]
+        rows, cols, cap = q_cfg["rows"], q_cfg["cols"], q_cfg["capacity"]
+        d = artifact.download()
+        ckpt_path = os.path.join(d, "model.ckpt")
+        if os.path.exists(ckpt_path):
+            run_data = (ckpt_path, rows, cols, cap, i * 20)
+            report.append_figures(plot_weights_2d(run_data))
+    if rows is not None:
+        report.save(f"momos2d_wa_r{rows}_c{cols}_cap{cap}.pdf")
+# %%

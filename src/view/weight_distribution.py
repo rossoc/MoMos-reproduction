@@ -1,9 +1,11 @@
 import torch
 import numpy as np
 from sklearn.decomposition import PCA
+import scipy.stats
 
 from src.view.figure import Figure
 from src.quantizers import iter_trainable_params, tensor_to_blocks
+from src.quantizers.momos2d import tensor2D_to_blocks
 from src.model import MLP
 
 
@@ -24,19 +26,32 @@ def extract_blocks(model, block_size):
 
 
 def load_model(checkpoint_path):
-    weights = torch.load(
-        checkpoint_path, weights_only=True, map_location=torch.device("cpu")
-    )
+    # Use weights_only=False fallback because PL checkpoints contain non-tensor fields.
+    try:
+        weights = torch.load(checkpoint_path, weights_only=True, map_location="cpu")
+    except Exception:
+        weights = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
 
     try:
         state_dict = weights["state_dict"]
-    except Exception as _:
+    except Exception:
         state_dict = weights
     new_state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
 
     model = MLP(3 * 32 * 32, 10)
     model.load_state_dict(new_state_dict)
     return model
+
+
+def extract_blocks_2d(model, rows, cols):
+    with torch.no_grad():
+        layer_specs = []
+        all_blocks = []
+        for param in iter_trainable_params(model):
+            blocks, n_params, shape = tensor2D_to_blocks(param.detach(), rows, cols)
+            layer_specs.append((param, int(blocks.size(0)), int(n_params), shape))
+            all_blocks.append(blocks)
+    return all_blocks, layer_specs
 
 
 def scatter_data(blocks, layers_specs, name):
@@ -57,6 +72,22 @@ def scatter_data(blocks, layers_specs, name):
     )
 
 
+def correlation_data(all_blocks: torch.Tensor) -> dict:
+    """Compute Pearson and Spearman correlation between x_1 and x_2 columns."""
+    x1 = all_blocks[:, 0].numpy()
+    x2 = all_blocks[:, 1].numpy()
+    pearson_r, pearson_p = scipy.stats.pearsonr(x1, x2)
+    spearman_r, spearman_p = scipy.stats.spearmanr(x1, x2)
+    return {
+        "x1": x1,
+        "x2": x2,
+        "pearson_r": pearson_r,
+        "pearson_p": pearson_p,
+        "spearman_r": spearman_r,
+        "spearman_p": spearman_p,
+    }
+
+
 def report_weight_distribution(
     run,
     frequencies=None,
@@ -69,7 +100,7 @@ def report_weight_distribution(
         fig = Figure(fontsize=17)
         fig.plot(
             scatter,
-            f"Motifs per layer for S={run[1]}, capacity={run[2]}",
+            f"Motifs per layer - {run[2]}",
             symbol="o",
             axis=None,
             x_label="$X_1$",
@@ -81,7 +112,7 @@ def report_weight_distribution(
         fig = Figure(fontsize=17)
         fig.plot(
             frequencies,
-            f"Motifs frequencies for S={run[1]}, capacity={run[2]}",
+            f"Motifs frequencies - {run[2]}",
             x_label="Motifs",
             y_label="Frequency",
             colors=["red", "green", "pink", "coral", "purple"],
@@ -94,7 +125,7 @@ def report_weight_distribution(
         fig = Figure(fontsize=17)
         fig.plot(
             norms,
-            f"Frequencies of Motifs' norms per layer for S={run[1]}, capacity={run[2]}",
+            f"Motifs' norms per layer - {run[2]}",
             x_label="Norms",
             y_label="Frequency",
             logy=True,
@@ -105,7 +136,7 @@ def report_weight_distribution(
 
     if scatter_layer:
         fig = Figure(
-            f"Frequencies of Motifs' norms per layer for S={run[1]}, capacity={run[2]}",
+            f"Motifs' norms per layer - {run[2]}",
             nrows=2,
             ncols=2,
         )
@@ -125,13 +156,49 @@ def report_weight_distribution(
     return res
 
 
-def plot_weights(run) -> list[Figure]:
-    model = load_model(run[0])
+def _plot_correlation(corr: dict, epoch: str) -> Figure:
+    """Scatter of all (x1, x2) pairs with regression line and correlation stats."""
+    x1 = corr["x1"]
+    x2 = corr["x2"]
+    pearson_r = corr["pearson_r"]
+    pearson_p = corr["pearson_p"]
+    spearman_r = corr["spearman_r"]
+    spearman_p = corr["spearman_p"]
 
-    blocks, layers_specs = extract_blocks(model, run[1])
+    fig = Figure(fontsize=17)
+    scatter_data_dict = {"Weight Correlation": np.array([x1, x2])}
+    fig.plot(
+        scatter_data_dict,
+        f"Weight Correlation (epoch {epoch})",
+        symbol="o",
+        axis=None,
+        x_label="$X_1$",
+        y_label="$X_2$",
+    )
 
-    all_blocks = torch.cat(blocks, dim=0)
+    # Add regression line and stats as text annotation
+    ax = fig._ax()
+    z = np.polyfit(x1, x2, 1)
+    p = np.poly1d(z)
+    x_line = np.array([x1.min(), x1.max()])
+    ax.plot(x_line, p(x_line), "r--", linewidth=2, label="Linear fit")
 
+    stats_text = f"Pearson r={pearson_r:.3f} (p={pearson_p:.2e})\nSpearman r={spearman_r:.3f} (p={spearman_p:.2e})"
+    ax.text(
+        0.05,
+        0.95,
+        stats_text,
+        transform=ax.transAxes,
+        verticalalignment="top",
+        fontsize=10,
+        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+    )
+    ax.legend()
+
+    return fig
+
+
+def _plot_all_blocks(run, all_blocks, blocks, layers_specs) -> list[Figure]:
     if all_blocks.shape[1] == 2:
         _, counts = all_blocks.unique(dim=0, return_counts=True)
 
@@ -140,20 +207,20 @@ def plot_weights(run) -> list[Figure]:
             "All layers": (range(len(sort_idx)), counts[sort_idx] / len(counts))
         }
 
-        # frequencies = frequency_data(all_blocks, blocks)
-        # print(len(scatter_layer.items()))
-
         modules = module_data(all_blocks, blocks)
         scatter, scatter_layer = scatter_data(blocks, layers_specs, run[2])
 
-        return report_weight_distribution(
+        figures = report_weight_distribution(
             run, frequencies, modules, scatter, scatter_layer
         )
 
-    elif all_blocks.shape[1] > 2:
-        pca = PCA(n_components=0.9999)  # Retain all blocks
-        pca.fit(all_blocks)
+        corr = correlation_data(all_blocks)
+        figures.append(_plot_correlation(corr, run[2]))
 
+        return figures
+
+    elif all_blocks.shape[1] > 2:
+        pca = PCA(n_components=0.9999)
         pca = pca.fit(all_blocks)
         block_transformed = [pca.transform(b) for b in blocks]
 
@@ -177,6 +244,25 @@ def plot_weights(run) -> list[Figure]:
         return figures
     else:
         raise ValueError("What did you mean to do? In PlotWeight, shape is < 2")
+
+
+def plot_weights(run) -> list[Figure]:
+    model = load_model(run[0])
+    blocks, layers_specs = extract_blocks(model, run[1])
+    all_blocks = torch.cat(blocks, dim=0)
+    return _plot_all_blocks(run, all_blocks, blocks, layers_specs)
+
+
+def plot_weights_2d(run) -> list[Figure]:
+    # run = (checkpoint_path, rows, cols, capacity, epoch)
+    # rows/cols must be supplied by the caller (fetched from wandb run config).
+    model = load_model(run[0])
+    rows, cols = int(run[1]), int(run[2])
+    epoch = run[4] if len(run) > 4 else "?"
+    blocks, layers_specs = extract_blocks_2d(model, rows, cols)
+    all_blocks = torch.cat(blocks, dim=0)
+    run_display = (run[0], f"rows={rows},cols={cols}", f"epoch={epoch}")
+    return _plot_all_blocks(run_display, all_blocks, blocks, layers_specs)
 
 
 def plot_blocks(run, blocks, layers_specs):
