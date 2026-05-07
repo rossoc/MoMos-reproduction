@@ -204,7 +204,6 @@ def static_momos2D(
         "num_changed_weights": int(changed_weights),
         "motif_counts": motif_counts,
         "swapped_blocks": swapped_blocks,
-        "init_mode": init_mode,
     }
 
 
