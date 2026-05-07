@@ -37,13 +37,11 @@ def g_exp_inverse(
 
 
 def g_sr_rational(i: torch.Tensor) -> torch.Tensor:
-    """SR rational magnitude codebook (PySR best expression, v20 checkpoint).
+    """SR rational magnitude codebook (PySR best expression).
 
-    G(i) = 4.217787 / ((0.62344253 − 0.8370065/(0.3184213 − 0.026600074·i)) · (288.77637−i))
+    G(i) = 0.00033626049238844·i / (66.02802 − 0.2584038·i)^(1/4)
     """
-    inner = 0.3184213 - 0.026600074 * i
-    denom = (0.62344253 - 0.8370065 / inner) * (288.77637 - i)
-    return 4.217787 / denom
+    return 0.00033626049238844 * i / (66.02802 - 0.2584038 * i).pow(0.25)
 
 
 # ---------------------------------------------------------------------------
