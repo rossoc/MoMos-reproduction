@@ -110,7 +110,7 @@ def _initialize_motifs(all_blocks, k_eff, block_size, force_zero):
     )
 
     if force_zero and k_eff > 1:
-        idx = torch.randint(0, total_blocks, (k_eff - 1,), device=all_blocks.device)
+        idx = torch.randperm(total_blocks, device=all_blocks.device)[:k_eff - 1]
         motifs[1:] = all_blocks[idx]  # First row remains zero
     elif not force_zero:
         idx = torch.randperm(total_blocks, device=all_blocks.device)[:k_eff]
@@ -143,8 +143,9 @@ def _assign_blocks(
     if swapping_fn is not None:
         swapped = swapping_fn(nearest)
         swapped_count = (nearest != swapped).sum().item()
+        nearest = swapped
 
-    return nearest, swapped_count
+    return swapped, swapped_count
 
 
 def _update_model_parameters(layer_specs, quantized_blocks):

@@ -51,9 +51,9 @@ for i, r in enumerate(runs_df.iterrows()):
 
     if (
         (rows == 3 or cols == 3)
-        or (rows == 1 and cols == 1)
-        or (rows == 2 and cols in [2, 4])
-        or (rows == 8 and cols == 8)
+        # or (rows == 1 and cols == 1)
+        # or (rows == 2 and cols in [2, 4])
+        # or (rows == 8 and cols == 8)
     ):
         continue
     try:
