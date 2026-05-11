@@ -1,8 +1,13 @@
-"""Static (G-function) initialised MoMos 2D quantizer.
+"""MoMos 2D quantizer with G-function magnitude encoding.
 
-Three init modes share identical nearest-motif assignment infrastructure;
-only the codebook initialisation differs:
+Pipeline:
+  1. Random motif initialisation (standard MoMos — sample actual blocks).
+  2. First assignment pass — nearest-motif for each block.
+  3. G(i) encode — snap each motif's mean magnitude to the closest codebook
+     entry G(i), preserving element-wise signs.
+  4. Second assignment pass — reassign blocks to the encoded motifs.
 
+Three G(i) modes are supported:
   exp_inverse  — G(i) = A·(exp(B·i)−1), analytic inverse available
   exp_lookup   — same G(i), encoding via searchsorted over precomputed table
   sr_rational  — SR rational function, R²=0.9924 (best quality)
@@ -12,7 +17,7 @@ Default G-function parameters are fitted on a v20 CIFAR-10/MLP checkpoint.
 
 import torch
 from .block_utils import build_swap_motif
-from .momos import _assign_blocks
+from .momos import _assign_blocks, _initialize_motifs
 from .momos2d import blocks_to_tensor2D, _get_model_blocks2D
 
 # ---------------------------------------------------------------------------
@@ -95,6 +100,45 @@ def _initialize_motifs_static(
 
 
 # ---------------------------------------------------------------------------
+# G(i) magnitude encoding
+# ---------------------------------------------------------------------------
+
+
+def _encode_motifs_g(
+    motifs: torch.Tensor,
+    codebook: torch.Tensor,
+    force_zero: bool,
+) -> torch.Tensor:
+    """Snap each motif's magnitude to the nearest G(i) codebook entry.
+
+    Computes the per-motif mean absolute value, finds the closest entry in the
+    monotone codebook via searchsorted, and replaces every element with
+    ±G(i*) (element-wise sign preserved).  The zero motif (slot 0 when
+    force_zero=True) is left untouched.
+    """
+    start = int(force_zero)
+    if start >= motifs.size(0):
+        return motifs
+
+    subset = motifs[start:]               # (n, block_size)
+    mean_abs = subset.abs().mean(dim=1)   # (n,)
+
+    idx = torch.searchsorted(codebook.contiguous(), mean_abs.contiguous())
+    idx = idx.clamp(0, len(codebook) - 1)
+
+    idx_prev = (idx - 1).clamp(0)
+    d_curr = (codebook[idx] - mean_abs).abs()
+    d_prev = (codebook[idx_prev] - mean_abs).abs()
+    idx = torch.where(d_prev < d_curr, idx_prev, idx)
+
+    new_mag = codebook[idx].unsqueeze(1)  # (n, 1)
+
+    out = motifs.clone()
+    out[start:] = subset.sign() * new_mag
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Core algorithm
 # ---------------------------------------------------------------------------
 
@@ -114,10 +158,14 @@ def static_momos2D(
     progress_every_elements=None,
     swapping_fn=None,
 ) -> dict:
-    """MoMos 2D with G-function codebook initialisation.
+    """MoMos 2D with random init followed by G(i) magnitude encoding.
 
-    Identical to momos2D except motifs are seeded from a closed-form
-    magnitude function G(i) rather than random block sampling.
+    Two-pass pipeline:
+      Pass 1 — random motif init (sample actual blocks) + nearest-motif
+               assignment, same as standard MoMos.
+      Encode  — snap each motif's mean magnitude to the nearest G(i) codebook
+               entry, preserving element-wise signs.
+      Pass 2 — reassign blocks to the encoded motifs (with optional swapping).
 
     Args:
         model: Model whose trainable parameters are quantized in-place.
@@ -161,10 +209,23 @@ def static_momos2D(
         total_blocks = all_blocks.size(0)
         k_eff = max(1, min(k, total_blocks))
 
-        motifs = _initialize_motifs_static(
-            k_eff, block_size, init_mode, force_zero, A, B, all_blocks.device
+        # Pass 1: random init + assignment
+        motifs = _initialize_motifs(all_blocks, k_eff, block_size, force_zero)
+        _assign_blocks(
+            all_blocks,
+            motifs,
+            chunk_size,
+            show_chunk_progress,
+            progress_prefix,
+            progress_every_elements,
+            None,  # no swapping on first pass
         )
 
+        # Encode: snap motif magnitudes to G(i) codebook
+        codebook = build_codebook(init_mode, A, B).to(all_blocks.device)
+        motifs = _encode_motifs_g(motifs, codebook, force_zero)
+
+        # Pass 2: reassign with encoded motifs (swapping applied here)
         nearest, swapped_blocks = _assign_blocks(
             all_blocks,
             motifs,

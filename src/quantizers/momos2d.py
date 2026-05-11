@@ -153,9 +153,9 @@ def quantize_momos2D(model, quant_cfg):
 
     out = momos2D(
         model,
-        quant_cfg["cols"],
-        quant_cfg["rows"],
-        quant_cfg["k"],
+        rows=quant_cfg["rows"],
+        cols=quant_cfg["cols"],
+        k=quant_cfg["k"],
         force_zero=quant_cfg.get("force_zero", False),
         chunk_size=quant_cfg.get("chunk_size"),
         show_chunk_progress=quant_cfg.get("chunk_progress", False),
