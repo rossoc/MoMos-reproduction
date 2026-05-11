@@ -3,7 +3,7 @@
 Three init modes share identical nearest-motif assignment infrastructure;
 only the codebook initialisation differs:
 
-  exp_inverse  — G(i) = A·(exp(B·i^C)−1), analytic inverse available
+  exp_inverse  — G(i) = A·(exp(B·i)−1), analytic inverse available
   exp_lookup   — same G(i), encoding via searchsorted over precomputed table
   sr_rational  — SR rational function, R²=0.9924 (best quality)
 
@@ -19,21 +19,17 @@ from .momos2d import blocks_to_tensor2D, _get_model_blocks2D
 # G(i) functions: index → weight magnitude
 # ---------------------------------------------------------------------------
 
-_EXP_DEFAULTS = dict(A=9.10e-3, B=6.86e-3, C=1.084)
+_EXP_DEFAULTS = dict(A=7.014e-03, B=1.185e-02)
 
 
-def g_exp(
-    i: torch.Tensor, A: float = 9.10e-3, B: float = 6.86e-3, C: float = 1.084
-) -> torch.Tensor:
-    """3-parameter exponential magnitude codebook: G(i) = A·(exp(B·i^C)−1)."""
-    return A * (torch.exp(B * i.pow(C)) - 1.0)
+def g_exp( i: torch.Tensor, A: float, B: float) -> torch.Tensor:
+    """Exponential magnitude codebook: G(i) = A·(exp(B·i)−1)."""
+    return A * (torch.exp(B * i) - 1.0)
 
 
-def g_exp_inverse(
-    w: torch.Tensor, A: float = 9.10e-3, B: float = 6.86e-3, C: float = 1.084
-) -> torch.Tensor:
+def g_exp_inverse(w: torch.Tensor, A: float, B: float) -> torch.Tensor:
     """Analytic inverse of g_exp: maps |w| → codebook index i."""
-    return (torch.log(w.abs() / A + 1.0) / B).pow(1.0 / C)
+    return torch.log(w.abs() / A + 1.0) / B
 
 
 def g_sr_rational(i: torch.Tensor) -> torch.Tensor:
@@ -49,14 +45,12 @@ def g_sr_rational(i: torch.Tensor) -> torch.Tensor:
 # ---------------------------------------------------------------------------
 
 
-def build_codebook(
-    init_mode: str, A: float = 9.10e-3, B: float = 6.86e-3, C: float = 1.084
-) -> torch.Tensor:
+def build_codebook(init_mode: str, A: float, B: float) -> torch.Tensor:
     """Return the 256-entry magnitude codebook for the given init_mode."""
     i = torch.arange(256, dtype=torch.float32)
     if init_mode == "sr_rational":
         return g_sr_rational(i)
-    return g_exp(i, A, B, C)
+    return g_exp(i, A, B)
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +65,6 @@ def _initialize_motifs_static(
     force_zero: bool,
     A: float,
     B: float,
-    C: float,
     device: torch.device,
 ) -> torch.Tensor:
     """Build initial motif matrix from G(i) instead of random block sampling.
@@ -80,7 +73,7 @@ def _initialize_motifs_static(
     applies random signs to each block element.  If force_zero is True, the
     first motif is the zero vector and G-derived motifs fill slots [1, k_eff).
     """
-    codebook = build_codebook(init_mode, A, B, C).to(device)  # (256,)
+    codebook = build_codebook(init_mode, A, B).to(device)  # (256,)
 
     n_derived = k_eff - int(force_zero)
     if n_derived <= 0:
@@ -114,7 +107,6 @@ def static_momos2D(
     init_mode: str = "sr_rational",
     A: float = 9.10e-3,
     B: float = 6.86e-3,
-    C: float = 1.084,
     force_zero: bool = True,
     chunk_size=None,
     show_chunk_progress: bool = False,
@@ -133,7 +125,7 @@ def static_momos2D(
         cols: Block width.
         k: Number of motifs (codebook entries).
         init_mode: One of ``"exp_inverse"``, ``"exp_lookup"``, ``"sr_rational"``.
-        A, B, C: Exponential G-function parameters (used when init_mode is
+        A, B: Exponential G-function parameters (used when init_mode is
             ``"exp_inverse"`` or ``"exp_lookup"``).
         force_zero: If True the first motif is the all-zero vector.
         chunk_size: Memory budget in MB for distance computation (default 4096).
@@ -170,7 +162,7 @@ def static_momos2D(
         k_eff = max(1, min(k, total_blocks))
 
         motifs = _initialize_motifs_static(
-            k_eff, block_size, init_mode, force_zero, A, B, C, all_blocks.device
+            k_eff, block_size, init_mode, force_zero, A, B, all_blocks.device
         )
 
         nearest, swapped_blocks = _assign_blocks(
@@ -233,7 +225,6 @@ def quantize_static_momos2D(model, quant_cfg: dict) -> dict:
         init_mode=quant_cfg.get("init_mode", "sr_rational"),
         A=quant_cfg.get("exp_A", _EXP_DEFAULTS["A"]),
         B=quant_cfg.get("exp_B", _EXP_DEFAULTS["B"]),
-        C=quant_cfg.get("exp_C", _EXP_DEFAULTS["C"]),
         force_zero=quant_cfg.get("force_zero", True),
         chunk_size=quant_cfg.get("chunk_size"),
         show_chunk_progress=quant_cfg.get("chunk_progress", False),
