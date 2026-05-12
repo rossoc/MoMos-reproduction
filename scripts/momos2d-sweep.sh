@@ -1,7 +1,7 @@
 #!/bin/bash
-COLS=(1 2 4)
-ROWS=(1 2 4)
-CAPACITIES=(0.001)
+COLS=(1 2 4 8)
+ROWS=(1 2 4 8)
+CAPACITIES=(0.001 0.01 0.1 0.0001)
 SEEDS=(42 123 777 482 291)
 
 # Iterate through all combinations
@@ -11,6 +11,11 @@ for col in "${COLS[@]}"; do
         # Skip the case where it's a 1x1 grid
         if [[ $col -eq 1 && $row -eq 1 ]]; then
             echo "Skipping 1x1 configuration..."
+            continue
+        fi
+
+        if [[ $((col * row)) -gt 8 ]]; then
+            echo "Skipping configuration (product > 8)..."
             continue
         fi
 
@@ -26,6 +31,7 @@ for col in "${COLS[@]}"; do
                     accelerator=cuda \
                     dataset.name=cifar10 \
                     wandb.enabled=true \
+                    wandb.project=momos2d-remake \
                     wandb.name="momos_2d_c${col}_r${row}_cap${cap}_s${seed}" \
                     "metrics=[sparsity,l2,gzip,bz2,lzma,bdm]" \
                     quantization.enabled=true \
@@ -35,8 +41,8 @@ for col in "${COLS[@]}"; do
                     quantization.capacity=$cap \
                     quantization.force_zero=true \
                     quantization.q=32 \
+                    patience=10 \
                     seed=$seed
-
             done
         done
     done

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # Removed commas: Bash arrays use spaces as separators
 PERCS=("[0.1]" "[0.5]" "[0.95]" "[0.99]")
@@ -21,11 +22,10 @@ for f_perc in "${PERCS[@]}"; do
             for seed in "${SEEDS[@]}"; do
                 
                 # --- RESUME LOGIC ---
-                if [ $experiment_count -lt $RESUME_FROM ]; then
+                if [ $experiment_count -le $RESUME_FROM ]; then
                     ((experiment_count++))
                     continue
                 fi
-                # --------------------
 
                 # Clean up names for WandB (removes brackets and quotes)
                 clean_f=$(echo "$f_perc" | tr -d '[]"')
@@ -38,21 +38,25 @@ for f_perc in "${PERCS[@]}"; do
 
                 # Added quotes around metrics to prevent shell expansion issues
                 uv run python src/train.py \
-                    epochs=500 \
+                    epochs=400 \
                     accelerator=cuda \
                     dataset.name=cifar10 \
+                    batch_size=256 \
+                    periodic_checkpoint=true \
                     wandb.enabled=true \
+                    wandb.project=momos-collapse \
                     wandb.name="momos_swapping_${clean_f}_t${clean_t}_p${prob}_s${seed}" \
                     "metrics=[sparsity,l2,gzip,bz2,lzma,bdm]" \
                     quantization.enabled=true \
                     quantization.method=momos \
                     quantization.s=2 \
-                    quantization.capacity=0.01 \
+                    quantization.capacity=0.001 \
                     quantization.force_zero=true \
                     quantization.q=32 \
                     quantization.swapping_probability="$prob" \
                     quantization.from_percentile="$f_perc" \
                     quantization.to_percentile="$t_perc" \
+                    patience=10 \
                     seed="$seed"
 
                 echo "Experiment #$experiment_count complete."

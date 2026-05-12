@@ -3,7 +3,6 @@
 # Define the best_params list: "row,col,capacity"
 BEST_PARAMS=(
     "2,1,0.001"
-    "1,4,0.001"
     "8,1,0.001"
     "1,8,0.001"
 )
@@ -19,7 +18,7 @@ for entry in "${BEST_PARAMS[@]}"; do
 
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True uv run python src/train.py \
         epochs=400 \
-        batch_size=128 \
+        batch_size=256 \
         accelerator=cuda \
         periodic_checkpoint=true \
         dataset.name=cifar10 \

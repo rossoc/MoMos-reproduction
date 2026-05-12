@@ -13,10 +13,10 @@ for col in "${COLS[@]}"; do
             continue
         fi
 
-        for seed in "${SEEDS[@]}"; do
+        # for seed in "${SEEDS[@]}"; do
 
             echo "------------------------------------------------"
-            echo "Running: cols=$col, rows=$row, cap=$cap, seed=$seed"
+            echo "Running: cols=$col, rows=$row" #, seed=$seed"
             echo "------------------------------------------------"
 
             uv run python src/train.py \
@@ -35,8 +35,8 @@ for col in "${COLS[@]}"; do
                 quantization.force_zero=true \
                 quantization.init_mode=sr_rational \
                 quantization.q=32 \
-                seed=$seed
+                seed=42 # $seed
 
-        done
+        # done
     done
 done
