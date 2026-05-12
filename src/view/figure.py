@@ -364,6 +364,7 @@ class Figure:
             points[1][skip_n : len(points[0]) - pop_n]
             + points[2][skip_n : len(points[0]) - pop_n],
             alpha=alpha,
+            color=colors[0],
         )
 
         ax1.grid(True)
@@ -396,6 +397,7 @@ class Figure:
             points[1][skip_n : len(points[0]) - pop_n]
             + points[2][skip_n : len(points[0]) - pop_n],
             alpha=alpha,
+            color=colors[1],
         )
 
         lines1, labels1 = ax1.get_legend_handles_labels()

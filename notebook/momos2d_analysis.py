@@ -9,12 +9,14 @@ import ast
 import numpy as np
 import os
 from tqdm import tqdm, trange
+from collections import defaultdict
 
-# %%
+project = "momos2d-remake"  # "momos-reproduction"
 api = wandb.Api()
+# %%
 
 # Project is specified by <entity/project-name>
-runs = api.runs("danesinoo-university-of-copenhagen/momos-reproduction")
+runs = api.runs(f"danesinoo-university-of-copenhagen/{project}")
 
 summary_list, config_list, name_list = [], [], []
 for run in tqdm(runs):
@@ -27,8 +29,9 @@ runs_df = pd.DataFrame(
     {"summary": summary_list, "config": config_list, "name": name_list}
 )
 
-runs_df.to_csv("project.csv")
-# runs_df = pd.read_csv("project.csv")
+# %%
+runs_df.to_csv(f"{project}.csv")
+runs_df = pd.read_csv(f"{project}.csv")
 
 
 # %%
@@ -49,13 +52,6 @@ for i, r in enumerate(runs_df.iterrows()):
     rows = config["quantization"]["rows"]
     cols = config["quantization"]["cols"]
 
-    if (
-        (rows == 3 or cols == 3)
-        # or (rows == 1 and cols == 1)
-        # or (rows == 2 and cols in [2, 4])
-        # or (rows == 8 and cols == 8)
-    ):
-        continue
     try:
         momos2d_runs.append(r[1])
     except Exception as e:
@@ -87,23 +83,16 @@ for r in momos2d_runs:
         }
     )
 # %%
-
-
-# %%
 momos2d_df = pd.DataFrame(momos2d_data)
 stats = momos2d_df.groupby("name")[
     ["val_acc", "val_loss", "train_acc", "train_loss"]
 ].agg(["mean", "std"])
-# %%
-stats.columns
 # %%
 stats = (
     momos2d_df.groupby(["name", "capacity"])["val_acc"]
     .agg(["mean", "std"])
     .reset_index()
 )
-
-# 2. Sort by capacity to ensure the lists/arrays are ordered correctly for plotting
 stats = stats.sort_values(["name", "capacity"])
 
 # 3. Create the dictionary mapping name to ([capacities], [means], [stds])
@@ -131,23 +120,18 @@ fig.plot_with_var(
 )
 fig.show()
 # %%
-best_params = [(2, 1, 0.001), (1, 4, 0.001), (8, 1, 0.001), (1, 8, 0.001)]
-momos2d_best = []
-for params in best_params:
-    for s in [42, 123, 777, 482, 291]:
-        momos2d_best.append(f"momos_2d_c{params[1]}_r{params[0]}_cap{params[2]}_s{s}")
-
-
+hyperparams = ["rows", "cols", "capacity"]
+detail_params = pd.DataFrame({"rows": [2, 2, 2, 1], "cols": [1, 2, 4, 8]})
+detail_params["capacity"] = 0.001
+detail_run_df = momos2d_df.merge(detail_params, on=hyperparams, how="inner")
 # %%
-momos2d_best
-# %%
-api = wandb.Api()
-runs = api.runs("danesinoo-university-of-copenhagen/momos-reproduction")
-
-momos2d_best_runs = []
-for r in tqdm(runs):
-    if r.name in momos2d_best:
-        momos2d_best_runs.append(r)
+detail_runs = [
+    api.runs(
+        f"danesinoo-university-of-copenhagen/{project}",
+        filters={"display_name": run["run_name"]},
+    )[0]
+    for run in tqdm(detail_run_df.to_dict("records"))
+]
 # %%
 MOMOS2D_METRICS = [
     "metrics/bdm_complexity",
@@ -163,10 +147,13 @@ MOMOS2D_METRICS = [
     "train/loss",
     "train/acc",
 ]
+
+
+# %%
+grouped_runs = detail_run_df.groupby(hyperparams)["run_name"].apply(list).reset_index()
 # %%
 momos2d_best_runs_data = []
-
-for run in tqdm(momos2d_best_runs):
+for run in tqdm(detail_runs):
     history = run.history(samples=500)
     assert type(history) is pd.DataFrame
 
@@ -192,58 +179,34 @@ for run in tqdm(momos2d_best_runs):
         }
     )
 # %%
-for r in momos2d_best_runs_data:
-    print(r["name"])
-
-
-# %%
-grouped_runs = (
-    momos2d_df.groupby(["rows", "cols", "capacity"])["run_name"]
-    .apply(list)
-    .reset_index()
-)
-
-
-# %%
-
-best_runs_summary = {}
-for params in best_params:
-    metrics = {}
-
-    for n in grouped_runs[
-        (grouped_runs["rows"] == params[0])
-        & (grouped_runs["cols"] == params[1])
-        & (grouped_runs["capacity"] == params[2])
-    ]["run_name"]:
-        for r in momos2d_best_runs_data:
-            if r["name"] in n:
-                for metric in MOMOS2D_METRICS:
-                    if metric not in metrics:
-                        metrics[metric] = []
-                    metrics[metric] += [np.array(r["metrics"][metric].tolist())]
+runs_summary = {}
+for r in grouped_runs.to_dict("records"):
+    metrics = defaultdict(list)
+    for run in momos2d_best_runs_data:
+        if run["name"] in r["run_name"]:
+            for metric in MOMOS2D_METRICS:
+                if metric not in metrics:
+                    metrics[metric] = []
+                values = np.array(run["metrics"][metric])[:-1]
+                metrics[metric] += [values]
 
     result = {}
     for k, v in metrics.items():
-        mean = np.mean(v, axis=0)[:-1]
-        std = np.std(v, axis=0)[:-1]
+        max_len = max(len(run) for run in v)
+        v = [np.append(run, [np.nan] * (max_len - len(run))) for run in v]
+        mean = np.nanmean(v, axis=0)
+        std = np.nanstd(v, axis=0)
         result[k] = (mean, std)
 
-    best_runs_summary[
-        f"momos2d rows={params[0]} cols={params[1]} capacity={params[2]}"
-    ] = result
+    runs_summary[f"rows: {r['rows']} cols: {r['cols']} cap: {r['capacity']}"] = result
 # %%
-
 tr_overview = {
     "val/acc": "Validation Accuracy",
     "val/loss": "Validation Loss",
     "train/acc": "Training Accuracy",
     "train/loss": "Training Loss",
 }
-report.training_overview(best_runs_summary, tr_overview, show=True)
-
-
-# %%
-best_runs_summary
+report.training_overview(runs_summary, tr_overview, show=True)
 # %%
 metrics_overview = {
     "metrics/bdm_complexity": "BDM Complexity",
@@ -256,14 +219,14 @@ metrics_overview = {
     "quant/num_changed_weights": "Number of Changed Weights",
 }
 
-report.metrics_vs_accuracy(best_runs_summary, metrics_overview, True)
+report.metrics_vs_accuracy(runs_summary, metrics_overview, True)
 # %%
 report.save("momos2_overview.pdf")
 # %% [markdown]
 # # Weight Analysis
 # api = wandb.Api()
 runs = [
-    "model-87qv0k7c",
+    "model-pw0ti3vz",
     # "model-hvgwcsxv",
     # "model-nlsys31m",
     # "model-sk1uogwk",
@@ -272,7 +235,7 @@ _config_cache = {}
 for run_name in runs:
     report = Report()
     rows = cols = cap = None
-    for i in trange(1, 21):
+    for i in trange(0, 20):
         artifact = api.artifact(
             f"danesinoo-university-of-copenhagen/momos-collapse/{run_name}:v{i}"
         )
@@ -286,6 +249,15 @@ for run_name in runs:
         if os.path.exists(ckpt_path):
             run_data = (ckpt_path, rows, cols, cap, i * 20)
             report.append_figures(plot_weights_2d(run_data))
+            run_data = (ckpt_path, cols, rows, cap, i * 20)
+            report.append_figures(plot_weights_2d(run_data))
     if rows is not None:
         report.save(f"momos2d_wa_r{rows}_c{cols}_cap{cap}.pdf")
+# %%
+f"momos2d_wa_r{rows}_c{cols}_cap{cap}.pdf"
+
+print(len(report.figures))
+# %%
+report.save(f"momos2d_wa_r{rows}_c{cols}_cap{cap}.pdf")
+
 # %%

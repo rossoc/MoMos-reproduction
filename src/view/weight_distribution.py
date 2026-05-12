@@ -39,7 +39,10 @@ def load_model(checkpoint_path):
     new_state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
 
     model = MLP(3 * 32 * 32, 10)
-    model.load_state_dict(new_state_dict)
+    try:
+        model.load_state_dict(new_state_dict)
+    except Exception:
+        model.load_state_dict(state_dict["model"])
     return model
 
 
@@ -72,15 +75,19 @@ def scatter_data(blocks, layers_specs, name):
     )
 
 
-def correlation_data(all_blocks: torch.Tensor) -> dict:
-    """Compute Pearson and Spearman correlation between x_1 and x_2 columns."""
-    x1 = all_blocks[:, 0].numpy()
-    x2 = all_blocks[:, 1].numpy()
-    pearson_r, pearson_p = scipy.stats.pearsonr(x1, x2)
-    spearman_r, spearman_p = scipy.stats.spearmanr(x1, x2)
+def correlation_data(blocks: list[torch.Tensor]) -> dict:
+    """Compute per-block Pearson and Spearman correlation between x_1 and x_2 columns."""
+    pearson_r, pearson_p, spearman_r, spearman_p = [], [], [], []
+    for block in blocks:
+        x1 = block[:, 0].numpy()
+        x2 = block[:, 1].numpy()
+        pr, pp = scipy.stats.pearsonr(x1, x2)
+        sr, sp = scipy.stats.spearmanr(x1, x2)
+        pearson_r.append(float(pr))
+        pearson_p.append(float(pp))
+        spearman_r.append(float(sr))
+        spearman_p.append(float(sp))
     return {
-        "x1": x1,
-        "x2": x2,
         "pearson_r": pearson_r,
         "pearson_p": pearson_p,
         "spearman_r": spearman_r,
@@ -157,33 +164,25 @@ def report_weight_distribution(
 
 
 def _plot_correlation(corr: dict, epoch: str) -> Figure:
-    """Scatter of all (x1, x2) pairs with regression line and correlation stats."""
-    x1 = corr["x1"]
-    x2 = corr["x2"]
+    """Bar chart of per-block Pearson and Spearman r values."""
     pearson_r = corr["pearson_r"]
-    pearson_p = corr["pearson_p"]
     spearman_r = corr["spearman_r"]
-    spearman_p = corr["spearman_p"]
+    n = len(pearson_r)
+    indices = np.arange(n)
 
     fig = Figure(fontsize=17)
-    scatter_data_dict = {"Weight Correlation": np.array([x1, x2])}
-    fig.plot(
-        scatter_data_dict,
-        f"Weight Correlation (epoch {epoch})",
-        symbol="o",
-        axis=None,
-        x_label="$X_1$",
-        y_label="$X_2$",
-    )
-
-    # Add regression line and stats as text annotation
     ax = fig._ax()
-    z = np.polyfit(x1, x2, 1)
-    p = np.poly1d(z)
-    x_line = np.array([x1.min(), x1.max()])
-    ax.plot(x_line, p(x_line), "r--", linewidth=2, label="Linear fit")
+    width = 0.35
+    ax.bar(indices - width / 2, pearson_r, width, label="Pearson r", color="steelblue")
+    ax.bar(indices + width / 2, spearman_r, width, label="Spearman r", color="coral")
+    ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
+    ax.set_xlabel("Block index")
+    ax.set_ylabel("Correlation")
+    ax.set_title(f"Per-block correlation (epoch {epoch})")
+    ax.set_xticks(indices)
+    ax.legend()
 
-    stats_text = f"Pearson r={pearson_r:.3f} (p={pearson_p:.2e})\nSpearman r={spearman_r:.3f} (p={spearman_p:.2e})"
+    stats_text = f"mean Pearson r={np.mean(pearson_r):.3f}  mean Spearman r={np.mean(spearman_r):.3f}"
     ax.text(
         0.05,
         0.95,
@@ -201,6 +200,8 @@ def _plot_correlation(corr: dict, epoch: str) -> Figure:
 def _plot_all_blocks(run, all_blocks, blocks, layers_specs) -> list[Figure]:
     if all_blocks.shape[1] == 2:
         _, counts = all_blocks.unique(dim=0, return_counts=True)
+        print(all_blocks.shape)
+        print(counts.shape)
 
         sort_idx = torch.argsort(counts, descending=True)
         frequencies = {
@@ -211,10 +212,14 @@ def _plot_all_blocks(run, all_blocks, blocks, layers_specs) -> list[Figure]:
         scatter, scatter_layer = scatter_data(blocks, layers_specs, run[2])
 
         figures = report_weight_distribution(
-            run, frequencies, modules, scatter, scatter_layer
+            run,
+            frequencies=frequencies,
+            norms=modules,
+            scatter=scatter,
+            scatter_layer=scatter_layer,
         )
 
-        corr = correlation_data(all_blocks)
+        corr = correlation_data(blocks)
         figures.append(_plot_correlation(corr, run[2]))
 
         return figures
@@ -243,7 +248,9 @@ def _plot_all_blocks(run, all_blocks, blocks, layers_specs) -> list[Figure]:
 
         return figures
     else:
-        raise ValueError("What did you mean to do? In PlotWeight, shape is < 2")
+        raise ValueError(
+            f"What did you mean to do? In PlotWeight, shape is < 2: {all_blocks.shape}"
+        )
 
 
 def plot_weights(run) -> list[Figure]:

@@ -370,12 +370,14 @@ class TestResolveProgressEveryElements(unittest.TestCase):
 class TestBuildSwapMotif(unittest.TestCase):
     def _skewed_idx(self):
         """4 motifs: 0→50, 1→25, 2→20, 3→5. Sorted by freq asc: [3, 2, 1, 0]."""
-        return torch.cat([
-            torch.zeros(50, dtype=torch.long),
-            torch.ones(25, dtype=torch.long),
-            torch.full((20,), 2, dtype=torch.long),
-            torch.full((5,), 3, dtype=torch.long),
-        ])
+        return torch.cat(
+            [
+                torch.zeros(50, dtype=torch.long),
+                torch.ones(25, dtype=torch.long),
+                torch.full((20,), 2, dtype=torch.long),
+                torch.full((5,), 3, dtype=torch.long),
+            ]
+        )
 
     def test_returns_callable(self):
         swap = block_utils.build_swap_motif([0.0], [1.0], probability=1.0)
