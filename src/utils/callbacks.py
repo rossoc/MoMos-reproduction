@@ -178,7 +178,12 @@ def build_callbacks(
     quant_cfg = cfg.get("quantization", {})
     if quant_cfg.get("enabled", False):
         method = quant_cfg.get("method")
-        if method is not None and method.lower() in ("qat", "momos", "momos2d", "static_momos2d"):
+        if method is not None and method.lower() in (
+            "qat",
+            "momos",
+            "momos2d",
+            "static_momos2d",
+        ):
             # Build full quantization config dict for the quantizer modules
             full_quant_cfg = {
                 "method": method.lower(),
@@ -259,8 +264,12 @@ def build_callbacks(
                     full_quant_cfg["capacity"] = float(quant_cfg["capacity"])
                     full_quant_cfg["k"] = None
                 else:
-                    raise ValueError("static_momos2d requires either k or capacity in config")
-                full_quant_cfg["init_mode"] = str(quant_cfg.get("init_mode", "sr_rational"))
+                    raise ValueError(
+                        "static_momos2d requires either k or capacity in config"
+                    )
+                full_quant_cfg["init_mode"] = str(
+                    quant_cfg.get("init_mode", "sr_rational")
+                )
                 if quant_cfg.get("exp_A") is not None:
                     full_quant_cfg["exp_A"] = float(quant_cfg["exp_A"])
                 if quant_cfg.get("exp_B") is not None:
@@ -273,7 +282,9 @@ def build_callbacks(
                 if "chunk_progress" in quant_cfg:
                     full_quant_cfg["chunk_progress"] = bool(quant_cfg["chunk_progress"])
                 if "chunk_progress_elements" in quant_cfg:
-                    full_quant_cfg["chunk_progress_elements"] = quant_cfg["chunk_progress_elements"]
+                    full_quant_cfg["chunk_progress_elements"] = quant_cfg[
+                        "chunk_progress_elements"
+                    ]
                 if (
                     quant_cfg.get("from_percentile") is not None
                     and quant_cfg.get("to_percentile") is not None

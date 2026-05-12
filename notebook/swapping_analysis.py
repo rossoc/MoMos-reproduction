@@ -9,30 +9,24 @@ from tqdm import tqdm
 # %%
 
 api = wandb.Api()
+prj = "momos-collapse"
 
-# Project is specified by <entity/project-name>
-runs = api.runs("danesinoo-university-of-copenhagen/momos-reproduction")
 
+# %%
+runs = api.runs(f"danesinoo-university-of-copenhagen/{prj}")
 summary_list, config_list, name_list = [], [], []
 for run in tqdm(runs):
-    # .summary contains the output keys/values for metrics like accuracy.
-    #  We call ._json_dict to omit large files
     summary_list.append(run.summary._json_dict)
-
-    # .config contains the hyperparameters.
-    #  We remove special values that start with _.
     config_list.append({k: v for k, v in run.config.items() if not k.startswith("_")})
-
-    # .name is the human-readable name of the run.
     name_list.append(run.name)
 
 runs_df = pd.DataFrame(
     {"summary": summary_list, "config": config_list, "name": name_list}
 )
 
-runs_df.to_csv("project.csv")
-
-# runs_df = pd.read_csv("project.csv")
+runs_df.to_csv("{prj}.csv")
+# %%
+runs_df = pd.read_csv("{prj}.csv")
 report = Report()
 # %%
 
@@ -46,7 +40,7 @@ for r in runs_df.iterrows():
     if (
         config.get("quantization", None)
         and config["quantization"].get("swapping_probability", None)
-        and config.get("epochs", None) == 500
+        and config.get("epochs", None) == 400
     ):
         run = r[1]
         quant_cfg = config["quantization"]
@@ -65,9 +59,9 @@ for r in runs_df.iterrows():
 
         percentile_runs.append(
             {
-                "name1": f"Change with {p_to}th",
-                "name2": f"{p_from}th <-- {p_to}th",
-                "name3": f"Changing {p_from}th",
+                "name1": f"Replace with {p_to}th",
+                "name2": f"Replace {p_from}th with {p_to}th",
+                "name3": f"Replace {p_from}th",
                 "run_name": r[1]["name"],
                 "val_acc": summary["val/acc"],
                 "from_percentile": p_from,
@@ -168,16 +162,13 @@ grouped_swapping = (
 best_params = grouped_swapping.sort_values("mean", ascending=False)[:4][hyperparams]
 best_run_df = percentile_df.merge(best_params, on=hyperparams)
 # %%
-
-api = wandb.Api()
-runs = api.runs("danesinoo-university-of-copenhagen/momos-reproduction")
-
 best_runs = []
-for r in tqdm(runs):
-    if r.name in best_run_df["run_name"].tolist() and r.summary["epoch"] == 500:
-        best_runs.append(r)
-
-
+for name in tqdm(best_run_df["run_name"].tolist()):
+    run = api.runs(
+        f"danesinoo-university-of-copenhagen/{prj}",
+        filters={"display_name": name},
+    )
+    best_runs.append(run[0])
 # %%
 grouped_runs = best_run_df.groupby(hyperparams)["run_name"].apply(list).reset_index()
 # %%
@@ -238,8 +229,10 @@ for r in grouped_runs.iterrows():
 
     result = {}
     for k, v in metrics.items():
-        mean = np.mean(v, axis=0)
-        std = np.std(v, axis=0)
+        max_len = max(len(run) for run in v)
+        v = [np.append(run, [np.nan] * (max_len - len(run))) for run in v]
+        mean = np.nanmean(v, axis=0)
+        std = np.nanstd(v, axis=0)
         result[k] = (mean, std)
 
     best_runs_summary[
@@ -255,15 +248,6 @@ tr_overview = {
 
 report.training_overview(best_runs_summary, tr_overview, show=True)
 
-# for m, t in tr_overview.items():
-#     data = {}
-#     for k, v in best_runs_summary.items():
-#         data[k] = (range(len(v[m][0])), v[m][0], v[m][1])
-#     print(data)
-#     fig.plot_with_var(data, "", y_label=t)
-# fig.show()
-# %%
-
 metrics_overview = {
     "metrics/bdm_complexity": "BDM Complexity",
     "metrics/gzip_compression_rate": "Gzip Compression Rate",
@@ -276,18 +260,5 @@ metrics_overview = {
 }
 
 report.metrics_vs_accuracy(best_runs_summary, metrics_overview, True)
-
-# for m, t in metrics_overview.items():
-#     fig = report.new_figure(t + " vs Validation Loss", nrows=2, ncols=2)
-#
-#     for sub_t, data in best_runs_summary.items():
-#         d = (
-#             (range(len(data[m][0])), data[m][0], data[m][1]),
-#             (range(len(data["val/loss"][0])), data["val/loss"][0], data["val/loss"][1]),
-#         )
-#         fig.plot_twinx_with_var(d, sub_t, y1_label=t)
-#         fig.show()
-
-
 # %%
 report.save("percentile_ablations.pdf")

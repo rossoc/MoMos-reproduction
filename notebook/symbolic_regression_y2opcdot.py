@@ -7,6 +7,7 @@ find closed-form codebook formulas. Outputs a multi-page PDF showing per-version
 Pareto fronts, fits vs. empirical quantiles, residuals, and a final summary page
 comparing R² evolution across training.
 """
+
 import os
 import sys
 import warnings
@@ -31,6 +32,7 @@ MAX_SIZE = 25
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _quantile_targets(weights):
     magnitudes = np.sort(np.abs(weights))
     idx = np.arange(256, dtype=float)
@@ -40,6 +42,7 @@ def _quantile_targets(weights):
 
 def _baseline(idx, targets):
     """3-parameter exponential baseline: A·(exp(B·i^C)−1)."""
+
     def G(i, A, B, C):
         return A * (np.exp(B * np.power(i, C)) - 1)
 
@@ -68,6 +71,7 @@ def _reconstruction_mse(weights, codebook):
 
 def _run_pysr(idx, targets):
     from pysr import PySRRegressor
+
     sr = PySRRegressor(
         niterations=N_ITERATIONS,
         maxsize=MAX_SIZE,
@@ -93,6 +97,7 @@ def _run_pysr(idx, targets):
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
+
 
 def main():
     api = wandb.Api()
@@ -122,7 +127,7 @@ def main():
 
     # Per-version results
     results = {}  # version -> dict with keys: idx, targets, base_pred, base_r2, base_label,
-                  #                              sr_pred, sr_r2, sr_eq, sr_equations, weights
+    #                              sr_pred, sr_r2, sr_eq, sr_equations, weights
 
     for i in VERSIONS:
         print(f"\n── Version v{i} ──────────────────────────────────────────────")

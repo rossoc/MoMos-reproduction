@@ -25,7 +25,14 @@ from .momos import (
 )
 
 from .momos2d import quantize_momos2D, momos2D
-from .static_momos import quantize_static_momos2D, static_momos2D, g_exp, g_exp_inverse, g_sr_rational, build_codebook
+from .static_momos import (
+    quantize_static_momos2D,
+    static_momos2D,
+    g_exp,
+    g_exp_inverse,
+    g_sr_rational,
+    build_codebook,
+)
 
 __all__ = [
     # Fake quantization

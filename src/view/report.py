@@ -90,8 +90,9 @@ def report(filename, experiments, momos_data, group_by, momos_runs, show=True):
 
 
 class Report:
-    def __init__(self):
+    def __init__(self, output_dir="assets"):
         self.figures = []
+        self.output_dir = dir
 
     def new_figure(self, title=None, figSize=(10, 7), ncols=1, nrows=1, fontsize=13):
         fig = Figure(title, figSize, ncols, nrows, fontsize)
@@ -99,7 +100,7 @@ class Report:
         return fig
 
     def save(self, filename):
-        with PdfPages(filename) as pdf:
+        with PdfPages(self.output_dir + filename) as pdf:
             for fig in self.figures:
                 fig.save(pdf=pdf)
 

@@ -27,7 +27,7 @@ from .momos2d import blocks_to_tensor2D, _get_model_blocks2D
 _EXP_DEFAULTS = dict(A=7.014e-03, B=1.185e-02)
 
 
-def g_exp( i: torch.Tensor, A: float, B: float) -> torch.Tensor:
+def g_exp(i: torch.Tensor, A: float, B: float) -> torch.Tensor:
     """Exponential magnitude codebook: G(i) = A·(exp(B·i)−1)."""
     return A * (torch.exp(B * i) - 1.0)
 
@@ -120,8 +120,8 @@ def _encode_motifs_g(
     if start >= motifs.size(0):
         return motifs
 
-    subset = motifs[start:]               # (n, block_size)
-    mean_abs = subset.abs().mean(dim=1)   # (n,)
+    subset = motifs[start:]  # (n, block_size)
+    mean_abs = subset.abs().mean(dim=1)  # (n,)
 
     idx = torch.searchsorted(codebook.contiguous(), mean_abs.contiguous())
     idx = idx.clamp(0, len(codebook) - 1)
