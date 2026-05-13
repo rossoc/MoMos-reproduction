@@ -14,11 +14,8 @@ with warnings.catch_warnings():
     try:
         from pybdm import BDM
 
-        bdm_engine = BDM(ndim=1)
-
     except Exception:
         BDM = None  # type: ignore
-        bdm_engine = None
 
 
 def flatten_weights(model):
@@ -67,7 +64,7 @@ def compression_rate(payload, compressed_payload):
     return float(raw_size / compressed_size)
 
 
-def compute_metrics(model, names, compression_binarized=False):
+def compute_metrics(model, names, compression_binarized=False, ndim = 1):
     """Compute selected metrics on the current model weights.
 
     Uses WeightAnalyzer internally for efficient caching.
@@ -80,7 +77,9 @@ def compute_metrics(model, names, compression_binarized=False):
     Returns:
         Dict of merged metric outputs.
     """
-    analyzer = WeightAnalyzer(model, compression_binarized=compression_binarized)
+    analyzer = WeightAnalyzer(
+        model, compression_binarized=compression_binarized, ndim=ndim
+    )
     registry = {
         "sparsity": ("sparsity", analyzer.sparsity),
         "l2": ("weight_l2", analyzer.l2_norm),
@@ -114,10 +113,11 @@ class WeightAnalyzer:
         compression_binarized: If True, use binarized payload for compression metrics.
     """
 
-    def __init__(self, model, compression_binarized=False):
+    def __init__(self, model, compression_binarized=False, ndim=1):
         self.weights = flatten_weights(model)
         self._payload_cache = {}
         self._compression_binarized = compression_binarized
+        self.bdm_engine = BDM(ndim=ndim) if BDM is not None else None
 
     def set_compression_binarized(self, value):
         """Set the binarized flag for compression payloads.
@@ -160,13 +160,13 @@ class WeightAnalyzer:
         Returns:
             Float complexity value, or None if BDM unavailable.
         """
-        if bdm_engine is None:
+        if self.bdm_engine is None:
             return None
         if self.weights.size == 0:
             return 0.0
         bits = np.ascontiguousarray((self.weights > 0).astype(np.uint8))
         try:
-            return float(bdm_engine.bdm(bits))
+            return float(self.bdm_engine.bdm(bits))
         except Exception:
             return None
 

@@ -97,8 +97,14 @@ class QuantizationCallback(L.Callback):
 
         model = pl_module.model
         try:
+            ndim = (
+                2
+                if self.method == "momos2d"
+                and int(self.quant_cfg.get("rows", 1)) > 1
+                else 1
+            )
             metrics = compute_metrics(
-                model, self.metric_names, self.compression_binarized
+                model, self.metric_names, self.compression_binarized, ndim=ndim
             )
             for name, value in metrics.items():
                 if value is not None:
