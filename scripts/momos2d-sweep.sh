@@ -1,8 +1,10 @@
 #!/bin/bash
-COLS=(1 2 4 8)
-ROWS=(1 2 4 8)
-CAPACITIES=(0.001 0.01 0.1 0.0001)
-SEEDS=(42 123 777 482 291)
+set -e
+
+COLS=(2)
+ROWS=(2)
+CAPACITIES=(0.001)
+SEEDS=(42)
 
 # Iterate through all combinations
 for col in "${COLS[@]}"; do
@@ -28,7 +30,6 @@ for col in "${COLS[@]}"; do
 
                 uv run python src/train.py \
                     epochs=100 \
-                    accelerator=cuda \
                     dataset.name=cifar10 \
                     wandb.enabled=true \
                     wandb.project=momos2d-remake \

@@ -24,7 +24,7 @@ from .momos import (
     quantize_momos,
 )
 
-from .momos2d import quantize_momos2D, momos2D
+from .momos2d import quantize_momos2D, momos2D, tensor2D_to_blocks
 from .static_momos import (
     quantize_static_momos2D,
     static_momos2D,
@@ -57,6 +57,7 @@ __all__ = [
     # MoMos2D core
     "momos2D",
     "quantize_momos2D",
+    "tensor2D_to_blocks",
     # Static MoMos2D (G-function initialised)
     "static_momos2D",
     "quantize_static_momos2D",

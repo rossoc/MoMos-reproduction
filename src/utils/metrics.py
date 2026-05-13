@@ -3,6 +3,7 @@ import gzip
 import lzma
 import numpy as np
 import warnings
+from quantizers import iter_trainable_params
 
 with warnings.catch_warnings():
     warnings.filterwarnings(
@@ -11,11 +12,7 @@ with warnings.catch_warnings():
         category=UserWarning,
         module=r"pybdm\.utils",
     )
-    try:
-        from pybdm import BDM
-
-    except Exception:
-        BDM = None  # type: ignore
+    from pybdm import BDM
 
 
 def flatten_weights(model):
@@ -27,10 +24,10 @@ def flatten_weights(model):
     Returns:
         1D float32 NumPy array of trainable parameters.
     """
-    arrays = []
-    for param in model.parameters():
-        if param.requires_grad and param.numel() > 0:
-            arrays.append(param.detach().cpu().reshape(-1).float().numpy())
+    arrays = [
+        params.detach().cpu().reshape(-1).float().numpy()
+        for params in iter_trainable_params(model)
+    ]
     if not arrays:
         return np.array([], dtype=np.float32)
     return np.concatenate(arrays)
@@ -64,7 +61,7 @@ def compression_rate(payload, compressed_payload):
     return float(raw_size / compressed_size)
 
 
-def compute_metrics(model, names, compression_binarized=False, ndim = 1):
+def compute_metrics(model, names, compression_binarized=False, ndim=1):
     """Compute selected metrics on the current model weights.
 
     Uses WeightAnalyzer internally for efficient caching.
@@ -115,9 +112,20 @@ class WeightAnalyzer:
 
     def __init__(self, model, compression_binarized=False, ndim=1):
         self.weights = flatten_weights(model)
+        if ndim > 1:
+            weights2d = [
+                params.detach().cpu().float().numpy()
+                for params in iter_trainable_params(model)
+            ]
+            self.weights2d = weights2d if weights2d else []
+        else:
+            self.weights2d = None
+
         self._payload_cache = {}
         self._compression_binarized = compression_binarized
-        self.bdm_engine = BDM(ndim=ndim) if BDM is not None else None
+        self._bdm_engine = BDM(ndim=ndim) if BDM is not None else None
+        self._bdm_engine_1d = BDM(ndim=1) if (BDM is not None and ndim > 1) else None
+        self._ndim = ndim
 
     def set_compression_binarized(self, value):
         """Set the binarized flag for compression payloads.
@@ -160,15 +168,33 @@ class WeightAnalyzer:
         Returns:
             Float complexity value, or None if BDM unavailable.
         """
-        if self.bdm_engine is None:
+        if self._bdm_engine is None:
             return None
         if self.weights.size == 0:
             return 0.0
-        bits = np.ascontiguousarray((self.weights > 0).astype(np.uint8))
-        try:
-            return float(self.bdm_engine.bdm(bits))
-        except Exception:
-            return None
+        if self._ndim == 1:
+            bits = np.ascontiguousarray((self.weights > 0).astype(np.uint8))
+            try:
+                return float(self._bdm_engine.bdm(bits))
+            except Exception as e:
+                print(e)
+                return None
+        else:
+            if not self.weights2d:
+                return 0.0
+            total = 0.0
+            for layer in self.weights2d:
+                if layer.ndim < 2:
+                    continue
+                if layer.ndim > 2:
+                    layer = layer.reshape(layer.shape[0], -1)
+                bits = np.ascontiguousarray((layer > 0).astype(np.uint8))
+                try:
+                    total += float(self._bdm_engine.bdm(bits))
+                except Exception as e:
+                    print(e)
+                    return None
+            return total
 
     def _compress_payload(self, backend):
         """Compress the configured payload and return the compression rate."""
