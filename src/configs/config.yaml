@@ -9,6 +9,7 @@ defaults:
 epochs: 200
 patience: null
 seed: 42
+fold: null  # set to 0-(n_folds-1) to activate k-fold cross-validation
 
 # Data
 data_dir: ./data

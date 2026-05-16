@@ -29,6 +29,9 @@ def main(cfg: DictConfig):
         img_size=cfg.dataset.img_size,
         val_pct=cfg.dataset.val_pct,
         test_pct=cfg.dataset.test_pct,
+        n_folds=cfg.dataset.n_folds,
+        fold=cfg.get("fold", None),
+        kfold_seed=cfg.dataset.kfold_seed,
         runtime=runtime_cfg,
     )
 

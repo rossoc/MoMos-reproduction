@@ -31,6 +31,9 @@ class ImageDataModule(L.LightningDataModule):
         val_pct=None,
         test_pct=None,
         split_seed=10,
+        n_folds=5,
+        fold=None,
+        kfold_seed=10,
         runtime=None,
         data_dir="./data",
     ):
@@ -41,6 +44,11 @@ class ImageDataModule(L.LightningDataModule):
         self.val_pct = normalize_pct(val_pct, "val_pct")
         self.test_pct = normalize_pct(test_pct, "test_pct")
         self.split_seed = split_seed
+        self.n_folds = n_folds
+        self.fold = int(fold) if fold is not None else None
+        self.kfold_seed = kfold_seed
+        if self.fold is not None and not (0 <= self.fold < self.n_folds):
+            raise ValueError(f"fold must be in [0, {self.n_folds - 1}], got {self.fold}")
         self.runtime = runtime or {
             "num_workers": 0,
             "pin_memory": False,
@@ -83,6 +91,38 @@ class ImageDataModule(L.LightningDataModule):
         rng = torch.Generator().manual_seed(int(self.split_seed))
         perm_train = torch.randperm(total_train, generator=rng)
         perm_test = torch.randperm(total_test, generator=rng)
+
+        if self.fold is not None:
+            kfold_rng = torch.Generator().manual_seed(int(self.kfold_seed))
+            perm = torch.randperm(total_train, generator=kfold_rng)
+            fold_size = total_train // self.n_folds
+            val_start = self.fold * fold_size
+            val_end = total_train if self.fold == self.n_folds - 1 else val_start + fold_size
+            val_idx = perm[val_start:val_end].tolist()
+            train_idx = perm[
+                torch.cat([torch.arange(val_start), torch.arange(val_end, total_train)])
+            ].tolist()
+            self.train_dataset = Subset(train_data, train_idx)
+            self.val_dataset = Subset(train_eval_data, val_idx)
+            test_count = count_from_pct(
+                total_test,
+                self.test_pct if self.test_pct is not None else 1.0,
+                "test_pct",
+            )
+            test_idx = perm_test[:test_count].tolist()
+            self.test_dataset = Subset(test_data, test_idx)
+            self.split_info = {
+                "split_mode": "kfold",
+                "has_proper_test": True,
+                "train_size": len(train_idx),
+                "val_size": len(val_idx),
+                "test_size": test_count,
+                "fold": self.fold,
+                "n_folds": self.n_folds,
+                "kfold_seed": int(self.kfold_seed),
+                "test_pct": self.test_pct,
+            }
+            return
 
         val_count = count_from_pct(total_train, self.val_pct, "val_pct")
 
