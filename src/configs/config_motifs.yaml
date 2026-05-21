@@ -1,0 +1,46 @@
+defaults:
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+# Path to the motifs.pt produced by src/extract_motifs.py
+motifs_path: ./motifs.pt
+
+# Training
+epochs: 200
+seed: 42
+batch_size: 4096
+val_pct: 0.0          # >0 to hold out a random fraction of blocks for val/acc
+accelerator: auto
+devices: 1
+
+# Model: SIREN is strongly recommended over 'mlp' for memorization tasks.
+model:
+  arch: siren            # 'mlp' or 'siren'
+  index_bits: 32
+  hidden_dim: 1024
+  depth: 5               # siren only
+  w0_first: 30.0         # siren only
+  w0_hidden: 1.0         # siren only
+  learning_rate: 1e-4
+  weight_decay: 0.0
+
+# Logging
+log_dir: ./outputs
+prefix: motifs
+
+wandb:
+  enabled: true
+  project: momos-reproduction
+  entity: null
+  name: null
+  tags: [motifs]
+  log_model: false
+
+hydra:
+  output_subdir: null
+  run:
+    dir: ./outputs
+  sweep:
+    dir: ./outputs
+    subdir: ${hydra.job.name}
