@@ -24,7 +24,7 @@ def main(cfg: DictConfig):
     run_name = generate_slug()
     L.seed_everything(cfg.seed)
 
-    accelerator, runtime_cfg = resolve_runtime(cfg.accelerator)
+    _, runtime_cfg = resolve_runtime(cfg.accelerator)
 
     ds_cfg = cfg.dataset
     img_dm = ImageDataModule(
@@ -35,7 +35,7 @@ def main(cfg: DictConfig):
         val_pct=ds_cfg.val_pct,
         test_pct=ds_cfg.test_pct,
         n_folds=ds_cfg.n_folds,
-        fold=ds_cfg.fold,
+        fold=cfg.fold,
         kfold_seed=ds_cfg.kfold_seed,
         runtime=runtime_cfg,
     )
