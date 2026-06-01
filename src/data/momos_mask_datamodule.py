@@ -49,6 +49,7 @@ class MotifMaskDataset(Dataset):
 
         self.layer_grids = []
         self.layer_shapes = [spec[3] for spec in layers_specs]
+        self.original_params = [spec[0].detach().clone() for spec in layers_specs]
         offset = 0
         for _, num_blocks, _, shape in layers_specs:
             layer_h = shape[0] // self.motif_rows

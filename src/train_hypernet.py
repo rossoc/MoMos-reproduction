@@ -104,6 +104,7 @@ def main(cfg: DictConfig):
         mlp_input_dim=input_dim,
         mlp_num_classes=int(vd.num_classes),
         motif_batch_size=cfg.get("motif_batch_size", None),
+        original_params=ds.original_params,
     )
 
     # 4. Callbacks + Trainer

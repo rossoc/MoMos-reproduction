@@ -46,10 +46,11 @@ class LitMamba(L.LightningModule):
         mlp_input_dim: int | None = None,
         mlp_num_classes: int | None = None,
         motif_batch_size: int | None = None,
+        original_params: list | None = None,
     ):
         super().__init__()
         self.save_hyperparameters(
-            ignore=["motifs", "layer_shapes", "image_datamodule"]
+            ignore=["motifs", "layer_shapes", "image_datamodule", "original_params"]
         )
 
         self.model = Mamba(
@@ -89,6 +90,7 @@ class LitMamba(L.LightningModule):
         self.mlp_num_classes = mlp_num_classes
         self.motif_batch_size = motif_batch_size
         self._cached_val_loader = None
+        self.original_params = original_params
 
         if save_init_path:
             os.makedirs(os.path.dirname(save_init_path), exist_ok=True)
@@ -120,7 +122,9 @@ class LitMamba(L.LightningModule):
 
         return loss
 
-    def build_mlp(self, motifs: torch.Tensor | None = None) -> LitMLP:
+    def build_mlp(
+        self, motifs: torch.Tensor | None = None
+    ) -> tuple[LitMLP, float | None]:
         """Assemble a `LitMLP` whose weights come from Mamba-predicted masks.
 
         For every (motif, layer) the Mamba head produces logits over
@@ -145,6 +149,8 @@ class LitMamba(L.LightningModule):
             num_classes=self.mlp_num_classes,
         ).to(device)
 
+        sse_total = 0.0
+        n_total = 0
         was_training = self.training
         self.eval()
         try:
@@ -184,12 +190,21 @@ class LitMamba(L.LightningModule):
                     reconstructed = blocks_to_tensor2D(
                         blocks, shape, int(self.motif_rows), int(self.motif_cols)
                     )
-                    param.data.copy_(reconstructed.view_as(param).to(param.dtype))
+                    recon = reconstructed.view_as(param).to(param.dtype)
+                    param.data.copy_(recon)
+
+                    if self.original_params is not None:
+                        orig = self.original_params[L_idx].to(
+                            device=device, dtype=recon.dtype
+                        )
+                        sse_total += float(((recon - orig) ** 2).sum().item())
+                        n_total += orig.numel()
         finally:
             if was_training:
                 self.train()
 
-        return lit_mlp
+        mse = (sse_total / n_total) if n_total > 0 else None
+        return lit_mlp, mse
 
     def on_train_epoch_end(self):
         """Reconstruct an MLP from predicted masks and evaluate on the validation fold."""
@@ -202,7 +217,9 @@ class LitMamba(L.LightningModule):
         if val_loader is None:
             return
 
-        lit_mlp = self.build_mlp()
+        lit_mlp, recon_mse = self.build_mlp()
+        if recon_mse is not None:
+            self.log("val/recon_mse", recon_mse, prog_bar=True)
         lit_mlp.eval()
         criterion = nn.CrossEntropyLoss()
 
