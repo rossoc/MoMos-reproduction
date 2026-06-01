@@ -203,9 +203,16 @@ def momos(
         counts = torch.bincount(nearest, minlength=k_eff).to("cpu", dtype=torch.long)
         motif_counts[:k_eff] = counts
 
-        diff = all_blocks - quantized_blocks
-        distortion = diff.square().sum().item()
-        changed_weights = (all_blocks != quantized_blocks).sum().item()
+        changed_weights = 0
+        distortion = 0.0
+        offset = 0
+        for _param, n_blocks, n_params, _shape in layer_specs:
+            next_offset = offset + n_blocks
+            layer_orig = all_blocks[offset:next_offset].flatten()[:n_params]
+            layer_quant = quantized_blocks[offset:next_offset].flatten()[:n_params]
+            distortion += (layer_orig - layer_quant).square().sum().item()
+            changed_weights += (layer_orig != layer_quant).sum().item()
+            offset = next_offset
 
         _update_model_parameters(layer_specs, quantized_blocks)
 

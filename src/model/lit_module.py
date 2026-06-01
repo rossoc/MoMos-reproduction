@@ -29,6 +29,8 @@ class LitMLP(L.LightningModule):
         weight_decay: float = 1e-2,
         epochs: int = 200,
         save_init_path: str | None = None,
+        rows: int | None = None,
+        cols: int | None = None,
     ):
         super().__init__()
         self.save_hyperparameters()
