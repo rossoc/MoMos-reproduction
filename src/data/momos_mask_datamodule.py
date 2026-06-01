@@ -210,12 +210,6 @@ class MotifMaskDataModule(L.LightningDataModule):
     def train_dataloader(self):
         return self._build_dataloader(self.train_dataset, shuffle=True)
 
-    def val_dataloader(self):
-        return None
-
-    def test_dataloader(self):
-        return None
-
     def summary(self) -> dict:
         if self.train_dataset is None:
             self.setup()

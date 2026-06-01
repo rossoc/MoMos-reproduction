@@ -1,3 +1,5 @@
+import warnings
+
 from torchvision import datasets, transforms
 
 import utils.init as utils
@@ -60,9 +62,16 @@ def load_dataset(dataset_name, is_train, transform, data_dir):
         A torchvision dataset instance.
     """
     if dataset_name == "cifar10":
-        return datasets.CIFAR10(
-            data_dir, train=is_train, transform=transform, download=True
-        )
+        with warnings.catch_warnings():
+            # torchvision unpickles CIFAR-10 with `dtype(align=0)`, which NumPy
+            # 2.4 deprecated. Upstream fix pending; silence locally.
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*align should be passed as Python or NumPy boolean.*",
+            )
+            return datasets.CIFAR10(
+                data_dir, train=is_train, transform=transform, download=True
+            )
     if dataset_name == "mnist":
         return datasets.MNIST(
             data_dir, train=is_train, transform=transform, download=True

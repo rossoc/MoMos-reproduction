@@ -88,6 +88,7 @@ class LitMamba(L.LightningModule):
         self.mlp_input_dim = mlp_input_dim
         self.mlp_num_classes = mlp_num_classes
         self.motif_batch_size = motif_batch_size
+        self._cached_val_loader = None
 
         if save_init_path:
             os.makedirs(os.path.dirname(save_init_path), exist_ok=True)
@@ -195,7 +196,9 @@ class LitMamba(L.LightningModule):
         if self.image_datamodule is None or self.motifs is None:
             return
 
-        val_loader = self.image_datamodule.val_dataloader()
+        if self._cached_val_loader is None:
+            self._cached_val_loader = self.image_datamodule.val_dataloader()
+        val_loader = self._cached_val_loader
         if val_loader is None:
             return
 
