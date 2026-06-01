@@ -47,6 +47,7 @@ def main(cfg: DictConfig):
     )
 
     # Create LightningModule
+    quant_cfg = cfg.get("quant", {}) or {}
     model = LitMLP(
         input_dim=input_dim,
         num_classes=cfg.dataset.num_classes,
@@ -54,6 +55,8 @@ def main(cfg: DictConfig):
         weight_decay=cfg.model.weight_decay,
         epochs=cfg.epochs,
         save_init_path=init_ckpt_path,
+        rows=int(quant_cfg["rows"]) if quant_cfg.get("rows") is not None else None,
+        cols=int(quant_cfg["cols"]) if quant_cfg.get("cols") is not None else None,
     )
 
     # Setup callbacks via factory

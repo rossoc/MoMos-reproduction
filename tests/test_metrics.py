@@ -102,11 +102,11 @@ def zero_weight_model():
 
 class TestFlattenWeights:
     def test_flatten_known_weights(self, model_with_known_weights):
-        weights = flatten_weights(model_with_known_weights)
+        weights = flatten_weights(model_with_known_weights, rows=1, cols=1)
         assert isinstance(weights, np.ndarray)
         assert weights.dtype == np.float32
-        # 4*3 + 3*2 = 12 + 6 = 18 parameters
-        assert len(weights) == 18
+        # 4*3 + 3*2 = 12 + 6 = 18 parameters, each in its own 1x1 block
+        assert weights.shape == (18, 1)
 
     def test_flatten_empty_model(self, empty_model):
         weights = flatten_weights(empty_model)
@@ -120,8 +120,10 @@ class TestFlattenWeights:
                 [[0.5, -0.5]],
             ]
         )
-        weights = flatten_weights(model)
-        expected = np.array([1.0, 2.0, 3.0, 4.0, 0.5, -0.5], dtype=np.float32)
+        weights = flatten_weights(model, rows=1, cols=2)
+        expected = np.array(
+            [[1.0, 2.0], [3.0, 4.0], [0.5, -0.5]], dtype=np.float32
+        )
         np.testing.assert_array_equal(weights, expected)
 
 
@@ -140,8 +142,8 @@ class TestComputeSparsity:
 
     def test_sparsity_mixed(self, model_with_known_weights):
         result = compute_sparsity(model_with_known_weights)
-        # Count zeros in the known weights
-        weights = flatten_weights(model_with_known_weights)
+        # Count zeros in the known weights — match the WeightAnalyzer's block shape (1x1)
+        weights = flatten_weights(model_with_known_weights, rows=1, cols=1)
         expected_sparsity = float((weights == 0).mean())
         assert result["sparsity"] == pytest.approx(expected_sparsity, abs=1e-7)
 

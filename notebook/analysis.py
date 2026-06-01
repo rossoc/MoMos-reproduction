@@ -15,7 +15,6 @@
 # %% [markdown]
 # # Data Exploration
 # ## Data Import
-
 # %%
 from src.view import fetch_runs
 from src.view.report import report, Report

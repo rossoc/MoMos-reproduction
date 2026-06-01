@@ -1,0 +1,14 @@
+name: mamba
+num_heads: 16
+hidden_size: 32
+expand: 2 # head_dim = hidden_size * expand / num_heads
+state_size: 16
+num_hidden_layers: 2
+n_groups: 8
+hidden_act: silu
+time_step_min: 0.001
+time_step_max: 0.1
+cnn_kernel_size: 1
+cnn_padding: 0
+learning_rate: 3e-3
+weight_decay: 1e-2

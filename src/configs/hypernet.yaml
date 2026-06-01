@@ -1,0 +1,60 @@
+defaults:
+  - model: mamba
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+seed: 42
+epochs: 50
+batch_size: 1
+accelerator: auto
+devices: 1
+data_dir: ./data
+log_dir: ./outputs
+prefix: "hypernet"
+
+# checkpoint of the quantized MLP whose mask grid we want to learn
+checkpoint_path: ???
+chunk_size: 256
+
+# hypernet output grid (Mamba predicts a grid of `rows x cols` binary subblocks per position)
+rows: 4
+cols: 8
+# size of one MoMos2D motif block (must match the rows/cols used to quantize the source MLP)
+motif_rows: 1
+motif_cols: 2
+
+# image dataset used for per-epoch validation (cifar10-shaped)
+validation_dataset:
+  name: cifar10
+  num_classes: 10
+  in_channels: 3
+  img_size: 32
+  val_pct: 0.05
+  test_pct: 1.0
+  n_folds: 5
+  kfold_seed: 10
+  fold: 0
+
+patience: null
+periodic_checkpoint: null
+metrics: []
+all_compression_metrics_binarized: false
+quantization:
+  enabled: false
+
+wandb:
+  enabled: false
+  project: momos-hypernet
+  entity: null
+  name: null
+  tags: []
+  log_model: false
+
+hydra:
+  output_subdir: null
+  run:
+    dir: ./outputs
+  sweep:
+    dir: ./outputs
+    subdir: ${hydra.job.name}

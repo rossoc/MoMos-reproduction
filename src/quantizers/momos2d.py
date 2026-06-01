@@ -4,6 +4,16 @@ import torch.nn.functional as F
 import torch
 
 
+def pad_to_multiple(tensor, rows, cols, value=0):
+    """Pad the last two dims of `tensor` so they become multiples of (rows, cols)."""
+    orig_h, orig_w = tensor.shape[-2], tensor.shape[-1]
+    pad_h = (-orig_h) % rows
+    pad_w = (-orig_w) % cols
+    if pad_h == 0 and pad_w == 0:
+        return tensor
+    return F.pad(tensor, (0, pad_w, 0, pad_h), value=value)
+
+
 def tensor2D_to_blocks(tensor, rows, cols):
     """Flatten and pad a tensor into fixed-size blocks based on last 2 dims."""
     rows, cols = int(rows), int(cols)
@@ -17,13 +27,9 @@ def tensor2D_to_blocks(tensor, rows, cols):
         original_shape = tensor.shape
 
     tensor_view = tensor.view(-1, original_shape[-2], original_shape[-1])
-    batch, orig_h, orig_w = tensor_view.shape
+    batch = tensor_view.shape[0]
 
-    pad_h = (-orig_h) % rows
-    pad_w = (-orig_w) % cols
-
-    if pad_h > 0 or pad_w > 0:
-        tensor_view = F.pad(tensor_view, (0, pad_w, 0, pad_h))
+    tensor_view = pad_to_multiple(tensor_view, rows, cols, value=0.0)
 
     new_h, new_w = tensor_view.shape[1], tensor_view.shape[2]
 
@@ -43,7 +49,7 @@ def blocks_to_tensor2D(blocks, original_shape, rows, cols):
     num_blocks_h = (orig_h + rows - 1) // rows
     num_blocks_w = (orig_w + cols - 1) // cols
 
-    out = blocks.view(batch, num_blocks_h, num_blocks_w, rows, cols)
+    out = blocks.reshape(batch, num_blocks_h, num_blocks_w, rows, cols)
     out = out.permute(0, 1, 3, 2, 4)
 
     padded_h = num_blocks_h * rows
@@ -52,10 +58,7 @@ def blocks_to_tensor2D(blocks, original_shape, rows, cols):
     out = out.reshape(batch, padded_h, padded_w)
     out = out[:, :orig_h, :orig_w]
 
-    if original_shape[0] == 1:
-        return out.view(-1)
-
-    return out.view(original_shape)
+    return out.reshape(original_shape)
 
 
 def _get_model_blocks2D(model, rows, cols):

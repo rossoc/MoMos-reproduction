@@ -15,7 +15,7 @@ with warnings.catch_warnings():
     from pybdm import BDM
 
 
-def flatten_blocks(model, rows=1, cols=2):
+def flatten_weights(model, rows=1, cols=2):
     """Flatten trainable params into a block matrix via tensor2D_to_blocks.
 
     Returns a 2D float32 NumPy array [n_blocks, rows*cols].
@@ -59,9 +59,7 @@ def compression_rate(payload, compressed_payload):
     return float(raw_size / compressed_size)
 
 
-def compute_metrics(
-    model, names, compression_binarized=False, rows=None, cols=None
-):
+def compute_metrics(model, names, compression_binarized=False, rows=1, cols=1):
     """Compute selected metrics on the current model weights.
 
     Uses WeightAnalyzer internally for efficient caching.
@@ -114,7 +112,7 @@ class WeightAnalyzer:
     """
 
     def __init__(self, model, compression_binarized=False, rows=1, cols=1):
-        blocks = flatten_blocks(model, rows=rows, cols=cols)
+        blocks = flatten_weights(model, rows=rows, cols=cols)
         self.weights = blocks.ravel()
         self.weights2d = blocks
 

@@ -2,6 +2,8 @@
 
 import time
 
+import torch
+
 from .fake_quant import (
     RoundSTE,
     UniformSymmetric,
@@ -91,7 +93,7 @@ def quantize(model, quant_cfg):
         Stats dict with ``method`` and ``q_time``, or ``None``.
     """
     if not quant_cfg:
-        return {}
+        return None
 
     start = time.perf_counter()
     method = str(quant_cfg.get("method", "qat")).lower()
