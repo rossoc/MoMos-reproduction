@@ -7,7 +7,7 @@ defaults:
 seed: 42
 epochs: 50
 batch_size: 1
-motif_batch_size: 49
+motif_batch_size: 7
 accelerator: auto
 devices: 1
 data_dir: ./data
@@ -16,7 +16,7 @@ prefix: "hypernet"
 
 # checkpoint of the quantized MLP whose mask grid we want to learn
 checkpoint_path: ???
-chunk_size: 256
+chunk_size: 4096
 
 # hypernet output grid (Mamba predicts a grid of `rows x cols` binary subblocks per position)
 rows: 4
