@@ -19,9 +19,7 @@ class Mamba(nn.Module):
         hidden_act,
         time_step_min,
         time_step_max,
-        cnn_out_channels,
-        cnn_kernel_size,
-        cnn_padding,
+        out_channels,
     ):
         super().__init__()
         config = Mamba2Config(
@@ -57,13 +55,7 @@ class Mamba(nn.Module):
         )
 
         self.model = Mamba2Model(config)
-        self.cnn = nn.Conv1d(
-            in_channels=hidden_size,
-            out_channels=cnn_out_channels,
-            kernel_size=cnn_kernel_size,
-            stride=cnn_kernel_size,
-            padding=0,
-        )
+        self.proj = nn.Linear(hidden_size, out_channels)
 
     def forward(self, motif, layer, n_rows, n_cols, row=0, col=0):
         device = self.row_embedding.weight.device
@@ -83,7 +75,7 @@ class Mamba(nn.Module):
         x = torch.cat([prefix, grid], dim=1)
 
         last_hidden_state = self.model(inputs_embeds=x)[0][:, 1:]
-        out = self.cnn(last_hidden_state.transpose(1, 2)).transpose(1, 2)
+        out = self.proj(last_hidden_state)
         if squeeze_batch:
             out = out.squeeze(0)
         return out

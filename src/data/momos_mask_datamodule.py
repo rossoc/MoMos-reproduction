@@ -225,5 +225,5 @@ class MotifMaskDataModule(L.LightningDataModule):
             "num_rows": num_rows,
             "num_cols": num_cols,
             "num_layers": ds.n_layers,
-            "cnn_out_channels": self.rows * self.cols,
+            "out_channels": self.rows * self.cols,
         }
