@@ -92,7 +92,7 @@ def report(filename, experiments, momos_data, group_by, momos_runs, show=True):
 class Report:
     def __init__(self, output_dir="assets"):
         self.figures = []
-        self.output_dir = dir
+        self.output_dir = output_dir
 
     def new_figure(self, title=None, figSize=(10, 7), ncols=1, nrows=1, fontsize=13):
         fig = Figure(title, figSize, ncols, nrows, fontsize)

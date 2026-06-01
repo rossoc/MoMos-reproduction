@@ -35,6 +35,3 @@ class MLP(nn.Module):
         x = self.act(self.fc4(x))
         x = self.fc5(x)
         return x
-
-
-# return MLP(int(in_channels) * int(img_size) * int(img_size), num_classes)

@@ -3,11 +3,11 @@ set -e
 
 # Removed commas: Bash arrays use spaces as separators
 PERCS=("[0.1]" "[0.5]" "[0.95]" "[0.99]")
-PROBS=(0.8 1)
+PROBS=(0 0.3 0.5 0.8 1)
 SEEDS=(42 50 78 2 23)
 
 # SET THIS TO THE EXPERIMENT NUMBER THAT CRASHED
-RESUME_FROM=0
+RESUME_FROM=204
 experiment_count=1
 
 for f_perc in "${PERCS[@]}"; do
@@ -19,8 +19,9 @@ for f_perc in "${PERCS[@]}"; do
         fi
 
         for prob in "${PROBS[@]}"; do
-            for seed in "${SEEDS[@]}"; do
-                
+            for i in "${!SEEDS[@]}"; do
+                seed="${SEEDS[$i]}"
+                fold=$i  # The fold is now directly linked to the seed index (0, 1, 2, 3, 4)
                 # --- RESUME LOGIC ---
                 if [ $experiment_count -le $RESUME_FROM ]; then
                     ((experiment_count++))
@@ -56,8 +57,8 @@ for f_perc in "${PERCS[@]}"; do
                     quantization.swapping_probability="$prob" \
                     quantization.from_percentile="$f_perc" \
                     quantization.to_percentile="$t_perc" \
-                    patience=10 \
-                    seed="$seed"
+                    seed=$seed \
+                    fold=$fold
 
                 echo "Experiment #$experiment_count complete."
                 ((experiment_count++))

@@ -17,12 +17,10 @@
 # ## Data Import
 
 # %%
-from src.view import fetch_runs
 from src.view.report import Report
 from src.view.weight_distribution import plot_weights_2d
 from tqdm import trange
 
-import numpy as np
 import wandb
 import os
 
@@ -53,8 +51,7 @@ cap = 0.001
 ckpt_path = "final.pt"
 report = Report()
 if os.path.exists(ckpt_path):
-    run_data = (ckpt_path, rows, cols, 400)
-    report.append_figures(plot_weights_2d(run_data))
+    report.append_figures(plot_weights_2d(ckpt_path, rows, cols, 400))
 if rows is not None:
     report.save(f"momos2d_wa_r{rows}_c{cols}_cap{cap}.pdf")
 
@@ -79,7 +76,16 @@ for run_name in runs:
         d = artifact.download()
         ckpt_path = os.path.join(d, "model.ckpt")
         if os.path.exists(ckpt_path):
-            run_data = (ckpt_path, rows, cols, cap, 100)
-            report.append_figures(plot_weights_2d(run_data))
+            report.append_figures(plot_weights_2d(ckpt_path, rows, cols, 100))
     if rows is not None:
         report.save(f"momos2d_wa_r{rows}_c{cols}_cap{cap}.pdf")
+
+# %%
+
+import wandb
+
+api = wandb.Api()
+artifact = api.artifact(
+    "danesinoo-university-of-copenhagen/momos2d-remake/model-sh4p5gxq:v0"
+)
+artifact_dir = artifact.download()

@@ -260,15 +260,13 @@ def plot_weights(run) -> list[Figure]:
     return _plot_all_blocks(run, all_blocks, blocks, layers_specs)
 
 
-def plot_weights_2d(run) -> list[Figure]:
-    # run = (checkpoint_path, rows, cols, capacity, epoch)
+def plot_weights_2d(ckpt_path, rows, cols, epoch) -> list[Figure]:
     # rows/cols must be supplied by the caller (fetched from wandb run config).
-    model = load_model(run[0])
-    rows, cols = int(run[1]), int(run[2])
-    epoch = run[4] if len(run) > 4 else "?"
+    model = load_model(ckpt_path)
+    rows, cols = int(rows), int(cols)
     blocks, layers_specs = extract_blocks_2d(model, rows, cols)
     all_blocks = torch.cat(blocks, dim=0)
-    run_display = (run[0], f"rows={rows},cols={cols}", f"epoch={epoch}")
+    run_display = (ckpt_path, f"rows={rows},cols={cols}", f"epoch={epoch}")
     return _plot_all_blocks(run_display, all_blocks, blocks, layers_specs)
 
 
