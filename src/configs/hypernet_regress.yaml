@@ -13,6 +13,7 @@ devices: 1
 data_dir: ./data
 log_dir: ./outputs
 prefix: "hypernet_regress"
+fold: null
 
 # Per-position output grid of the hypernet (each (layer, row, col) embedding
 # produces `rows * cols` raw weight values).
