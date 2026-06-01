@@ -19,8 +19,18 @@ from utils.init import resolve_runtime, setup_checkpoint_dir
 from utils.callbacks import build_callbacks
 
 
-@hydra.main(config_path="configs", config_name="hypernet", version_base="1.3")
-def main(cfg: DictConfig):
+def run_training(cfg: DictConfig, optuna_trial=None) -> float:
+    """Run a full training and return the best ``val/acc`` observed.
+
+    Args:
+        cfg: Resolved Hydra configuration (same shape as ``configs/hypernet.yaml``).
+        optuna_trial: Optional Optuna ``Trial`` — when provided, a
+            ``PyTorchLightningPruningCallback`` is added so unpromising trials
+            can be stopped early.
+
+    Returns:
+        Best ``val/acc`` recorded by ``LitMamba`` across all epochs.
+    """
     run_name = generate_slug()
     L.seed_everything(cfg.seed)
 
@@ -121,6 +131,11 @@ def main(cfg: DictConfig):
         has_logger=has_logger,
     )
 
+    if optuna_trial is not None:
+        from utils.optuna_callback import OptunaTrainEpochPruning
+
+        callbacks.append(OptunaTrainEpochPruning(optuna_trial, monitor="val/acc"))
+
     if has_logger:
         wandb_cfg = cfg.wandb
         wandb_run_name = wandb_cfg.get("name") or unique_run_name
@@ -149,6 +164,13 @@ def main(cfg: DictConfig):
     )
 
     trainer.fit(model, datamodule=mask_dm)
+
+    return float(model.best_val_acc)
+
+
+@hydra.main(config_path="configs", config_name="hypernet", version_base="1.3")
+def main(cfg: DictConfig):
+    run_training(cfg)
 
 
 if __name__ == "__main__":
