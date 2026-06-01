@@ -35,6 +35,7 @@ def main(cfg: DictConfig):
         motif_cols=cfg.motif_cols,
         batch_size=cfg.batch_size,
         runtime=runtime_cfg,
+        motif_batch_size=cfg.get("motif_batch_size", None),
     )
     mask_dm.setup()
     summary = mask_dm.summary()
@@ -102,6 +103,7 @@ def main(cfg: DictConfig):
         image_datamodule=img_dm,
         mlp_input_dim=input_dim,
         mlp_num_classes=int(vd.num_classes),
+        motif_batch_size=cfg.get("motif_batch_size", None),
     )
 
     # 4. Callbacks + Trainer

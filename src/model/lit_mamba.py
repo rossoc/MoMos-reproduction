@@ -45,6 +45,7 @@ class LitMamba(L.LightningModule):
         image_datamodule=None,
         mlp_input_dim: int | None = None,
         mlp_num_classes: int | None = None,
+        motif_batch_size: int | None = None,
     ):
         super().__init__()
         self.save_hyperparameters(
@@ -86,6 +87,7 @@ class LitMamba(L.LightningModule):
         self.image_datamodule = image_datamodule
         self.mlp_input_dim = mlp_input_dim
         self.mlp_num_classes = mlp_num_classes
+        self.motif_batch_size = motif_batch_size
 
         if save_init_path:
             os.makedirs(os.path.dirname(save_init_path), exist_ok=True)
@@ -154,13 +156,16 @@ class LitMamba(L.LightningModule):
                     W_pad = layer_w * int(self.cols)
 
                     logits_full = torch.empty(K, H_pad, W_pad, device=device)
-                    for k in range(K):
-                        motif_id = torch.tensor(k, device=device, dtype=torch.long)
-                        layer_id = torch.tensor(L_idx, device=device, dtype=torch.long)
-                        out = self.model(motif_id, layer_id, layer_h, layer_w)
-                        out = out.view(layer_h, layer_w, int(self.rows), int(self.cols))
-                        out = out.permute(0, 2, 1, 3).reshape(H_pad, W_pad)
-                        logits_full[k] = out
+                    layer_id = torch.tensor(L_idx, device=device, dtype=torch.long)
+                    all_ids = torch.arange(K, device=device, dtype=torch.long)
+                    chunk = int(self.motif_batch_size) if self.motif_batch_size else K
+                    for start in range(0, K, chunk):
+                        ids = all_ids[start : start + chunk]
+                        out = self.model(ids, layer_id, layer_h, layer_w)
+                        b = out.shape[0]
+                        out = out.view(b, layer_h, layer_w, int(self.rows), int(self.cols))
+                        out = out.permute(0, 1, 3, 2, 4).reshape(b, H_pad, W_pad)
+                        logits_full[start : start + chunk] = out
 
                     predicted_M_padded = logits_full.argmax(dim=0)
 

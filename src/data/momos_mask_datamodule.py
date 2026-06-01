@@ -2,7 +2,7 @@
 per-(motif, layer) binary-mask training samples for the Mamba model."""
 
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Sampler
 import lightning as L
 
 from view.weight_distribution import load_model, extract_blocks_2d
@@ -92,6 +92,56 @@ class MotifMaskDataset(Dataset):
         return inputs, target
 
 
+class LayerBucketBatchSampler(Sampler[list[int]]):
+    """Yields batches of dataset indices that all share the same layer_idx.
+
+    MotifMaskDataset uses `motif_idx = index // n_layers`,
+    `layer_idx = index % n_layers`, so indices with the same
+    `index % n_layers` belong to the same layer.
+    """
+
+    def __init__(
+        self,
+        n_motifs: int,
+        n_layers: int,
+        batch_size: int,
+        shuffle: bool = True,
+        generator: torch.Generator | None = None,
+    ):
+        self.n_motifs = int(n_motifs)
+        self.n_layers = int(n_layers)
+        self.batch_size = max(1, int(batch_size))
+        self.shuffle = bool(shuffle)
+        self.generator = generator
+
+    def __iter__(self):
+        perm_kwargs = {"generator": self.generator} if self.generator is not None else {}
+        buckets: list[list[int]] = []
+        for L_idx in range(self.n_layers):
+            idx = torch.arange(self.n_motifs, dtype=torch.long) * self.n_layers + L_idx
+            if self.shuffle:
+                idx = idx[torch.randperm(idx.numel(), **perm_kwargs)]
+            for s in range(0, idx.numel(), self.batch_size):
+                buckets.append(idx[s : s + self.batch_size].tolist())
+        if self.shuffle:
+            order = torch.randperm(len(buckets), **perm_kwargs).tolist()
+            buckets = [buckets[i] for i in order]
+        yield from buckets
+
+    def __len__(self):
+        per_layer = (self.n_motifs + self.batch_size - 1) // self.batch_size
+        return per_layer * self.n_layers
+
+
+def _layer_collate(samples):
+    inputs0 = samples[0][0]
+    layer_id = inputs0[1]
+    n_rows, n_cols = inputs0[2], inputs0[3]
+    motif_ids = torch.stack([s[0][0] for s in samples], dim=0)
+    targets = torch.stack([s[1] for s in samples], dim=0)
+    return (motif_ids, layer_id, n_rows, n_cols), targets
+
+
 class MotifMaskDataModule(L.LightningDataModule):
     def __init__(
         self,
@@ -102,6 +152,7 @@ class MotifMaskDataModule(L.LightningDataModule):
         motif_cols: int,
         batch_size: int = 1,
         runtime: dict | None = None,
+        motif_batch_size: int | None = None,
     ):
         super().__init__()
         self.checkpoint_path = checkpoint_path
@@ -110,6 +161,7 @@ class MotifMaskDataModule(L.LightningDataModule):
         self.motif_rows = motif_rows
         self.motif_cols = motif_cols
         self.batch_size = int(batch_size)
+        self.motif_batch_size = motif_batch_size
         self.runtime = runtime or {
             "num_workers": 0,
             "pin_memory": False,
@@ -130,17 +182,29 @@ class MotifMaskDataModule(L.LightningDataModule):
         )
 
     def _build_dataloader(self, dataset, shuffle=False) -> DataLoader:
-        kwargs = {
-            "batch_size": self.batch_size,
-            "shuffle": shuffle,
+        kwargs: dict = {
             "num_workers": int(self.runtime["num_workers"]),  # type: ignore
             "pin_memory": bool(self.runtime["pin_memory"]),
-            "collate_fn": lambda batch: batch[0],
         }
-        if kwargs["num_workers"] > 0:  # type: ignore
+        if kwargs["num_workers"] > 0:
             kwargs["persistent_workers"] = bool(self.runtime["persistent_workers"])
             if self.runtime["prefetch_factor"] is not None:
                 kwargs["prefetch_factor"] = int(self.runtime["prefetch_factor"])
+
+        use_bucketed = self.motif_batch_size is not None and int(self.motif_batch_size) > 1
+        if use_bucketed:
+            sampler = LayerBucketBatchSampler(
+                n_motifs=dataset.n_motifs,
+                n_layers=dataset.n_layers,
+                batch_size=int(self.motif_batch_size),
+                shuffle=shuffle,
+            )
+            kwargs["batch_sampler"] = sampler
+            kwargs["collate_fn"] = _layer_collate
+        else:
+            kwargs["batch_size"] = self.batch_size
+            kwargs["shuffle"] = shuffle
+            kwargs["collate_fn"] = lambda batch: batch[0]
         return DataLoader(dataset, **kwargs)  # type: ignore
 
     def train_dataloader(self):

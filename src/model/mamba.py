@@ -67,18 +67,23 @@ class Mamba(nn.Module):
 
     def forward(self, motif, layer, n_rows, n_cols, row=0, col=0):
         device = self.row_embedding.weight.device
+        squeeze_batch = motif.dim() == 0
+        if squeeze_batch:
+            motif = motif.unsqueeze(0)
+
         motif_em = self.motif_embedding(motif)
         layer_em = self.layer_embedding(layer)
         rows_em = self.row_embedding(torch.arange(row, row + n_rows, device=device))
         cols_em = self.col_embedding(torch.arange(col, col + n_cols, device=device))
         grid_embeddings = rows_em.unsqueeze(1) + cols_em.unsqueeze(0)
 
-        prefix = (motif_em + layer_em).view(-1, self._hidden_size)
-        x = torch.cat([prefix, grid_embeddings.view(-1, self._hidden_size)]).unsqueeze(
-            0
-        )
+        B = motif_em.shape[0]
+        prefix = (motif_em + layer_em.unsqueeze(0)).unsqueeze(1)
+        grid = grid_embeddings.view(-1, self._hidden_size).unsqueeze(0).expand(B, -1, -1)
+        x = torch.cat([prefix, grid], dim=1)
 
         last_hidden_state = self.model(inputs_embeds=x)[0][:, 1:]
-        hidden = last_hidden_state.transpose(1, 2)
-        out = self.cnn(hidden)
-        return out.transpose(1, 2).squeeze(0)
+        out = self.cnn(last_hidden_state.transpose(1, 2)).transpose(1, 2)
+        if squeeze_batch:
+            out = out.squeeze(0)
+        return out
