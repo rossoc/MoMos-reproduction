@@ -26,9 +26,7 @@ class LitMamba(L.LightningModule):
         hidden_act,
         time_step_min,
         time_step_max,
-        cnn_out_channels,
-        cnn_kernel_size,
-        cnn_padding,
+        out_channels,
         learning_rate: float = 3e-3,
         weight_decay: float = 1e-2,
         epochs: int = 200,
@@ -67,9 +65,7 @@ class LitMamba(L.LightningModule):
             hidden_act=hidden_act,
             time_step_min=time_step_min,
             time_step_max=time_step_max,
-            cnn_out_channels=cnn_out_channels,
-            cnn_kernel_size=cnn_kernel_size,
-            cnn_padding=cnn_padding,
+            out_channels=out_channels,
         )
         self.criterion = nn.BCEWithLogitsLoss()
 
