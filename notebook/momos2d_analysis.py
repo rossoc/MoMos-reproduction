@@ -77,6 +77,7 @@ for r in momos2d_runs:
             "val_loss": summary["val/loss"],
             "train_acc": summary["train/acc"],
             "train_loss": summary["train/loss"],
+            "test_acc": summary["test/acc"],
             "rows": config["quantization"]["rows"],
             "cols": config["quantization"]["cols"],
             "capacity": config["quantization"]["capacity"],
@@ -85,11 +86,11 @@ for r in momos2d_runs:
 # %%
 momos2d_df = pd.DataFrame(momos2d_data)
 stats = momos2d_df.groupby("name")[
-    ["val_acc", "val_loss", "train_acc", "train_loss"]
+    ["val_acc", "val_loss", "train_acc", "train_loss", "test_acc", "test_acc"]
 ].agg(["mean", "std"])
 # %%
 stats = (
-    momos2d_df.groupby(["name", "capacity"])["val_acc"]
+    momos2d_df.groupby(["name", "capacity"])["test_acc"]
     .agg(["mean", "std"])
     .reset_index()
 )
@@ -115,10 +116,10 @@ fig.plot_with_var(
     "",
     symbol="o-",
     x_label="Capacity",
-    y_label="Validation Accuracy",
+    y_label="Test Accuracy",
     logx=True,
 )
-fig.show()
+# fig.show()
 # %%
 hyperparams = ["rows", "cols", "capacity"]
 detail_params = pd.DataFrame({"rows": [2, 2, 2, 1], "cols": [1, 2, 4, 8]})
@@ -222,42 +223,3 @@ metrics_overview = {
 report.metrics_vs_accuracy(runs_summary, metrics_overview, True)
 # %%
 report.save("momos2_overview.pdf")
-# %% [markdown]
-# # Weight Analysis
-# api = wandb.Api()
-runs = [
-    "model-pw0ti3vz",
-    # "model-hvgwcsxv",
-    # "model-nlsys31m",
-    # "model-sk1uogwk",
-]
-_config_cache = {}
-for run_name in runs:
-    report = Report()
-    rows = cols = cap = None
-    for i in trange(0, 20):
-        artifact = api.artifact(
-            f"danesinoo-university-of-copenhagen/momos-collapse/{run_name}:v{i}"
-        )
-        if run_name not in _config_cache:
-            q_cfg = artifact.logged_by().config.get("quantization", {})
-            _config_cache[run_name] = q_cfg
-        q_cfg = _config_cache[run_name]
-        rows, cols, cap = q_cfg["rows"], q_cfg["cols"], q_cfg["capacity"]
-        d = artifact.download()
-        ckpt_path = os.path.join(d, "model.ckpt")
-        if os.path.exists(ckpt_path):
-            run_data = (ckpt_path, rows, cols, cap, i * 20)
-            report.append_figures(plot_weights_2d(run_data))
-            run_data = (ckpt_path, cols, rows, cap, i * 20)
-            report.append_figures(plot_weights_2d(run_data))
-    if rows is not None:
-        report.save(f"momos2d_wa_r{rows}_c{cols}_cap{cap}.pdf")
-# %%
-f"momos2d_wa_r{rows}_c{cols}_cap{cap}.pdf"
-
-print(len(report.figures))
-# %%
-report.save(f"momos2d_wa_r{rows}_c{cols}_cap{cap}.pdf")
-
-# %%

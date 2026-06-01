@@ -15,15 +15,14 @@ _COLORS = [
     "pink",
     "teal",
     "coral",
-    "lavender",
     "purple",
     "gold",
-    "lime",
     "navy",
     "crimson",
     "turquoise",
     "maroon",
     "olive",
+    "lavender",
     "indigo",
     "salmon",
     "sienna",
@@ -31,6 +30,7 @@ _COLORS = [
     "khaki",
     "steelblue",
     "darkseagreen",
+    "lime",
 ]
 
 

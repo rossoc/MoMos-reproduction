@@ -1,10 +1,10 @@
 # %% [markdown]
 # Symbolic regression search for a closed-form codebook function G(i).
-# 
+#
 # Uses PySR to search over combinations of exp, log, pow, 1/x, sqrt and
 # arithmetic operators to find expressions that map index i ∈ [0, 255]
 # to weight magnitude |w|.
-# 
+#
 # Runs on the final (v20) checkpoint — the most converged weight distribution.
 # Prints the Pareto front (complexity vs. loss) and compares the best
 # discovered formula against the 3-param baseline G(i) = A·(exp(B·i^C)−1).
@@ -23,6 +23,7 @@ from pysr import PySRRegressor
 from src.view.weight_distribution import load_model
 from src.utils.metrics import flatten_weights
 from src.view import Report
+
 # %%
 ARTIFACT_DIR = "artifacts"
 MODEL_NAME = "model-87qv0k7c"
@@ -30,6 +31,8 @@ CHECKPOINT_VERSION = 20
 OUTPUT_PDF = "symbolic_regression.pdf"
 N_ITERATIONS = 200
 MAX_SIZE = 10  # max expression complexity (nodes)
+
+
 # %% [markdown]
 # Helpers
 # %%
@@ -42,6 +45,7 @@ def _quantile_targets(weights):
 
 def _baseline(idx, targets):
     """2-parameter exponential baseline: A·(exp(B·i)−1)."""
+
     def G(i, A, B):
         return A * (np.exp(B * i) - 1)
 
@@ -49,8 +53,7 @@ def _baseline(idx, targets):
     bounds = ([-1, -1], [np.inf, np.inf])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", OptimizeWarning)
-        (A, B), _ = curve_fit(G, idx, targets, p0=p0, bounds=bounds,
-                                 maxfev=2000000)
+        (A, B), _ = curve_fit(G, idx, targets, p0=p0, bounds=bounds, maxfev=2000000)
     predicted = G(idx, A, B)
     r2 = _r2(targets, predicted)
     return predicted, r2, f"A·(exp(B·i)−1)  [A={A:.3e} B={B:.3e}]"
@@ -67,6 +70,8 @@ def _reconstruction_mse(weights, codebook):
     mags = np.abs(weights)
     enc = np.argmin(np.abs(mags[:, None] - codebook[None, :]), axis=1)
     return float(np.mean((weights - signs * codebook[enc]) ** 2))
+
+
 # %%
 ckpt = os.path.join(ARTIFACT_DIR, f"{MODEL_NAME}:v{CHECKPOINT_VERSION}", "model.ckpt")
 print(f"Loading {ckpt} ...")
@@ -180,7 +185,4 @@ fig3.plot(
     legend=False,
 )
 # %%
-report.save(OUTPUT_PDF) 
-
-
-
+report.save(OUTPUT_PDF)

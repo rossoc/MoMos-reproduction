@@ -19,7 +19,7 @@ def main(cfg: DictConfig):
     run_name = generate_slug()
     L.seed_everything(cfg.seed)
 
-    accelerator, runtime_cfg = resolve_runtime(cfg.accelerator)
+    _, runtime_cfg = resolve_runtime(cfg.accelerator)
 
     # Create DataModule
     datamodule: ImageDataModule = ImageDataModule(
