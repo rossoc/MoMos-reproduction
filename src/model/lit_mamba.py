@@ -45,6 +45,7 @@ class LitMamba(L.LightningModule):
         mlp_num_classes: int | None = None,
         motif_batch_size: int | None = None,
         original_params: list | None = None,
+        output_layers: int | None = None,
     ):
         super().__init__()
         self.save_hyperparameters(
@@ -66,6 +67,7 @@ class LitMamba(L.LightningModule):
             time_step_min=time_step_min,
             time_step_max=time_step_max,
             out_channels=out_channels,
+            output_layers=output_layers,
         )
         self.criterion = nn.BCEWithLogitsLoss()
 
@@ -153,10 +155,10 @@ class LitMamba(L.LightningModule):
             with torch.no_grad():
                 params = list(iter_trainable_params(lit_mlp.model))
                 for L_idx, param in enumerate(params):
-                    layer_h = int(self.n_rows_per_layer[L_idx])
-                    layer_w = int(self.n_cols_per_layer[L_idx])
-                    H_pad = layer_h * int(self.rows)
-                    W_pad = layer_w * int(self.cols)
+                    layer_h = int(self.n_rows_per_layer[L_idx])  # type: ignore
+                    layer_w = int(self.n_cols_per_layer[L_idx])  # type: ignore
+                    H_pad = layer_h * int(self.rows)  # type: ignore
+                    W_pad = layer_w * int(self.cols)  # type: ignore
 
                     logits_full = torch.empty(K, H_pad, W_pad, device=device)
                     layer_id = torch.tensor(L_idx, device=device, dtype=torch.long)
@@ -166,7 +168,13 @@ class LitMamba(L.LightningModule):
                         ids = all_ids[start : start + chunk]
                         out = self.model(ids, layer_id, layer_h, layer_w)
                         b = out.shape[0]
-                        out = out.view(b, layer_h, layer_w, int(self.rows), int(self.cols))
+                        out = out.view(
+                            b,
+                            layer_h,
+                            layer_w,
+                            int(self.rows),
+                            int(self.cols),
+                        )
                         out = out.permute(0, 1, 3, 2, 4).reshape(b, H_pad, W_pad)
                         logits_full[start : start + chunk] = out
 
@@ -174,8 +182,12 @@ class LitMamba(L.LightningModule):
 
                     shape = self.layer_shapes[L_idx]
                     orig_h, orig_w = int(shape[-2]), int(shape[-1])
-                    num_blocks_h = (orig_h + int(self.motif_rows) - 1) // int(self.motif_rows)
-                    num_blocks_w = (orig_w + int(self.motif_cols) - 1) // int(self.motif_cols)
+                    num_blocks_h = (orig_h + int(self.motif_rows) - 1) // int(
+                        self.motif_rows
+                    )
+                    num_blocks_w = (orig_w + int(self.motif_cols) - 1) // int(
+                        self.motif_cols
+                    )
                     predicted_M = predicted_M_padded[:num_blocks_h, :num_blocks_w]
 
                     blocks = motifs_t[predicted_M]
