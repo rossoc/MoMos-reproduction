@@ -89,6 +89,7 @@ class LitMamba(L.LightningModule):
         self.motif_batch_size = motif_batch_size
         self._cached_val_loader = None
         self.original_params = original_params
+        self.best_val_acc = 0.0
 
         if save_init_path:
             os.makedirs(os.path.dirname(save_init_path), exist_ok=True)
@@ -248,8 +249,11 @@ class LitMamba(L.LightningModule):
         if n == 0:
             return
 
+        val_acc = total_correct / n
         self.log("val/loss", total_loss / n, prog_bar=True)
-        self.log("val/acc", total_correct / n, prog_bar=True)
+        self.log("val/acc", val_acc, prog_bar=True)
+        if val_acc > self.best_val_acc:
+            self.best_val_acc = val_acc
 
     def configure_optimizers(self):
         """Configure AdamW optimizer with cosine LR scheduler."""

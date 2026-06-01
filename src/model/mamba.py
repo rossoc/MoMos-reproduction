@@ -56,9 +56,9 @@ class Mamba(nn.Module):
         )
 
         self.model = Mamba2Model(config)
-        self.layers = [
-            nn.Linear(hidden_size, hidden_size) for _ in range(output_layers)
-        ]
+        self.layers = nn.ModuleList(
+            [nn.Linear(hidden_size, out_channels) for _ in range(output_layers)]
+        )
         self.output_head = nn.Linear(hidden_size, out_channels)
 
     def forward(self, motif, layer, n_rows, n_cols, row=0, col=0):
