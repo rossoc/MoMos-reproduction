@@ -136,6 +136,7 @@ class LitStructuredMomos(L.LightningModule):
         self.hypernet_update_every = max(1, int(hypernet_update_every))
         self._macro_step = 0
         self._W_leaves: dict[str, torch.Tensor] = {}
+        self._val_weight_dict: dict[str, torch.Tensor] | None = None
 
         self.register_buffer(
             "motifs", motifs.reshape(self.K, self.D).detach().clone(), persistent=False
@@ -342,21 +343,33 @@ class LitStructuredMomos(L.LightningModule):
         if sch is not None:
             sch.step()
 
+    def on_validation_epoch_start(self):
+        """Materialize the target MLP weight_dict once per validation epoch.
+
+        Argmax weights are a deterministic function of the (frozen-during-val)
+        hypernet params, so per-batch recomputation is pure waste.
+        """
+        with torch.no_grad():
+            weight_dict: dict[str, torch.Tensor] = {}
+            for L_idx, name in enumerate(self._target_param_names):
+                logits = self._layer_logits(L_idx)  # already cropped to [K, nbh, nbw]
+                idx = logits.argmax(dim=0)  # [nbh, nbw]
+                blocks = self.motifs[idx]  # type: ignore[index]
+                weight_dict[name] = blocks_to_tensor2D(
+                    blocks,
+                    self.layer_shapes[L_idx],
+                    self.motif_rows,
+                    self.motif_cols,
+                )
+        self._val_weight_dict = weight_dict
+
+    def on_validation_epoch_end(self):
+        self._val_weight_dict = None
+
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        # Hard argmax weights — matches deployment behaviour.
-        weight_dict: dict[str, torch.Tensor] = {}
-        for L_idx, name in enumerate(self._target_param_names):
-            logits = self._layer_logits(L_idx)
-            nbh, nbw = self._layer_block_counts(L_idx)
-            idx = logits[:, :nbh, :nbw].argmax(dim=0)  # [nbh, nbw]
-            blocks = self.motifs[idx]  # type: ignore[index]
-            weight_dict[name] = blocks_to_tensor2D(
-                blocks,
-                self.layer_shapes[L_idx],
-                self.motif_rows,
-                self.motif_cols,
-            )
+        weight_dict = self._val_weight_dict
+        assert weight_dict is not None, "on_validation_epoch_start did not run"
 
         logits = functional_call(self.target, weight_dict, (x,))
         loss = F.cross_entropy(logits, y)
