@@ -235,7 +235,6 @@ class LitStructuredMomos(L.LightningModule):
             {
                 "train/loss": loss,
                 "train/task_loss": task_loss,
-                "train/entropy": mean_entropy,
                 "train/acc": acc,
                 "train/tau": self._tau(),
             },
