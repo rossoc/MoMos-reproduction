@@ -67,6 +67,7 @@ class Mamba(nn.Module):
             [nn.Linear(hidden_size, hidden_size) for _ in range(output_layers)]
         )
         self.output_head = nn.Linear(hidden_size, out_channels)
+        self.relu = nn.ReLU(inplace=True)
 
         import transformers.models.mamba2.modeling_mamba2 as _m2
 
