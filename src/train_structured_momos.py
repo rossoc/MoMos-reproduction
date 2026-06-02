@@ -113,18 +113,9 @@ def run_training(cfg: DictConfig) -> float:
         learning_rate=float(cfg.model.learning_rate),
         weight_decay=float(cfg.model.weight_decay),
         epochs=int(cfg.epochs),
-        grad_clip=float(cfg.get("grad_clip", 1.0)),
-        # Gumbel + regularization
-        tau_start=float(cfg.gumbel.tau_start),
-        tau_end=float(cfg.gumbel.tau_end),
-        entropy_weight_start=float(cfg.regularization.entropy_weight_start),
-        entropy_weight_end=float(cfg.regularization.entropy_weight_end),
-        load_balance_weight=float(cfg.regularization.load_balance_weight),
         # Memory
         motif_chunk_size=cfg.get("motif_chunk_size", None),
         mamba_chunk_size=cfg.get("mamba_chunk_size", None),
-        # Macro-batched hypernet updates
-        hypernet_update_every=int(cfg.get("hypernet_update_every", 1)),
     )
 
     # 5. Checkpoints + callbacks + (optional) WandB.
@@ -168,9 +159,10 @@ def run_training(cfg: DictConfig) -> float:
         enable_progress_bar=True,
         enable_model_summary=True,
         deterministic=True,
-        # Sanity-check val runs *before* training and uses the same path as the
-        # real val step (full-K Mamba per layer). Skip it — the proper val at
-        # the end of epoch 0 will catch real bugs.
+        gradient_clip_val=float(cfg.get("grad_clip", 0.0)) or None,
+        # Sanity-check val runs *before* training and uses the same Mamba
+        # forward path as the real val step. Skip it — the end-of-epoch val
+        # will catch real bugs.
         num_sanity_val_steps=0,
     )
 

@@ -30,14 +30,6 @@ output_layers: 2
 motif_chunk_size: 4
 mamba_chunk_size: 64
 
-# Hypernet update cadence. The hypernet weights are recomputed and updated
-# once every `hypernet_update_every` task batches: within a macro-batch the
-# generated MLP weights are frozen and only the (cheap) target-MLP graph is
-# walked per step; at the boundary a single chunked hypernet backward
-# consumes the upstream gradient accumulated over the macro-batch.
-# Set to 1 to update per step (original behaviour, but slow).
-hypernet_update_every: 32
-
 # Image task data (CIFAR-10-shaped by default).
 task_dataset:
   name: cifar10
@@ -50,18 +42,6 @@ task_dataset:
   n_folds: 5
   kfold_seed: 10
   fold: 0
-
-# Softmax temperature schedule (annealed across epochs). Forward W is a soft
-# convex combination of motifs: W = softmax(logits/tau) @ M. Lower tau peaks
-# the mix toward a single motif per position.
-gumbel:
-  tau_start: 1.0
-  tau_end: 0.1
-
-regularization:
-  entropy_weight_start: 0.0
-  entropy_weight_end: 1.0e-2
-  load_balance_weight: 1.0e-3
 
 grad_clip: 1.0
 

@@ -95,7 +95,9 @@ class Mamba(nn.Module):
         out = self.model(inputs_embeds=x)[0][:, 1:]
         for linear in self.layers:
             out = self.relu(linear(out))
-        out = self.relu(self.output_head(out))
+        # No activation here: the caller treats this as a softmax/regression
+        # logit, which needs to be free to take negative values.
+        out = self.output_head(out)
         if squeeze_batch:
             out = out.squeeze(0)
         return out
