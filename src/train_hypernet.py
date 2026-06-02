@@ -38,7 +38,7 @@ def run_training(cfg: DictConfig, optuna_trial=None) -> float:
 
     # 1. Mask-training datamodule
     loss_mode = str(cfg.get("loss_mode", "bce"))
-    dm_mode = "per_layer" if loss_mode == "chunked_ce" else "per_motif"
+    dm_mode = "per_layer" if loss_mode in ("chunked_ce", "soft_recon") else "per_motif"
     mask_dm = MotifMaskDataModule(
         checkpoint_path=cfg.checkpoint_path,
         rows=cfg.rows,
@@ -119,6 +119,7 @@ def run_training(cfg: DictConfig, optuna_trial=None) -> float:
         output_layers=cfg.get("output_layers", 2),
         loss_mode=loss_mode,
         ce_chunk_size=cfg.get("ce_chunk_size", None),
+        layer_blocks=ds.layer_blocks,
     )
 
     # 4. Callbacks + Trainer

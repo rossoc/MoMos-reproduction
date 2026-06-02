@@ -48,16 +48,24 @@ class LitMamba(L.LightningModule):
         output_layers: int | None = None,
         loss_mode: str = "bce",
         ce_chunk_size: int | None = None,
+        layer_blocks: list | None = None,
     ):
         super().__init__()
         self.save_hyperparameters(
-            ignore=["motifs", "layer_shapes", "image_datamodule", "original_params"]
+            ignore=[
+                "motifs",
+                "layer_shapes",
+                "image_datamodule",
+                "original_params",
+                "layer_blocks",
+            ]
         )
-        if loss_mode not in ("bce", "chunked_ce"):
+        if loss_mode not in ("bce", "chunked_ce", "soft_recon"):
             raise ValueError(f"Unknown loss_mode {loss_mode!r}.")
         self.loss_mode = loss_mode
         self.ce_chunk_size = ce_chunk_size
-        if loss_mode == "chunked_ce":
+        self.layer_blocks = layer_blocks
+        if loss_mode in ("chunked_ce", "soft_recon"):
             self.automatic_optimization = False
 
         self.model = Mamba(
@@ -119,6 +127,8 @@ class LitMamba(L.LightningModule):
     def training_step(self, batch, batch_idx):
         if self.loss_mode == "chunked_ce":
             return self._training_step_chunked_ce(batch, batch_idx)
+        if self.loss_mode == "soft_recon":
+            return self._training_step_soft_recon(batch, batch_idx)
 
         x, y = batch
         logits = self(x)
@@ -245,6 +255,144 @@ class LitMamba(L.LightningModule):
             train_acc = total_correct.float() / n_valid
 
         self.log("train/loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/acc", train_acc, on_step=False, on_epoch=True, prog_bar=True)
+        return None
+
+    def _training_step_soft_recon(self, batch, batch_idx):
+        """Direct soft-reconstruction loss with chunked surrogate gradient.
+
+        For each spatial position ``n`` of a layer, the predicted soft motif is
+        ``m_soft[n] = sum_k softmax_k(logits)[k,n] * motifs[k]``; the loss is
+        ``mean_n ||m_soft[n] - original_block[n]||^2`` over valid positions.
+
+        Pass 1 (no grad): online-accumulate the softmax normalizer and the
+        soft-blended motif ``m_soft`` via a numerically stable
+        ``(running_max, sum_exp, sum_exp_motif)`` triple, chunk by chunk.
+
+        Pass 2 (with grad): for each chunk, build a surrogate whose gradient
+        w.r.t. ``logits[k,n]`` equals the exact MSE gradient
+        ``(2/N_valid) * softmax[k,n] * (<residual[n], motifs[k]> - <residual[n], m_soft[n]>)``,
+        and ``manual_backward`` per chunk so only one chunk's activations live.
+        """
+        (layer_id, n_rows, n_cols), grid = batch
+        layer_id_scalar = (
+            int(layer_id.item()) if isinstance(layer_id, torch.Tensor) else int(layer_id)
+        )
+        n_rows = int(n_rows.item()) if isinstance(n_rows, torch.Tensor) else int(n_rows)
+        n_cols = int(n_cols.item()) if isinstance(n_cols, torch.Tensor) else int(n_cols)
+        device = self.device
+
+        if self.motifs is None or self.layer_blocks is None:
+            raise RuntimeError("soft_recon requires `motifs` and `layer_blocks`.")
+
+        K = int(self.motifs.shape[0])  # type: ignore
+        motif_rows = int(self.motif_rows)  # type: ignore
+        motif_cols = int(self.motif_cols)  # type: ignore
+        D = motif_rows * motif_cols
+        motifs_flat = self.motifs.reshape(K, D).to(device=device, dtype=torch.float32)  # type: ignore
+
+        chunk_size = int(self.ce_chunk_size) if self.ce_chunk_size else K
+        chunk_size = max(1, min(chunk_size, K))
+
+        grid_flat = grid.reshape(-1).to(device=device, dtype=torch.long)  # [N]
+        valid = grid_flat >= 0
+        valid_f = valid.float()
+        n_valid = valid.sum().clamp(min=1).float()
+        N = grid_flat.numel()
+        H_pad = n_rows * int(self.rows)  # type: ignore
+        W_pad = n_cols * int(self.cols)  # type: ignore
+
+        # Build target [N, D] from the layer's original blocks. The dataset's
+        # layer_blocks are flat in (layer_h, layer_w) row-major order, which
+        # matches grid[:layer_h, :layer_w]; remaining padded positions are 0.
+        orig_blocks = self.layer_blocks[layer_id_scalar].to(
+            device=device, dtype=torch.float32
+        )  # [n_blocks, motif_rows, motif_cols]
+        n_blocks = orig_blocks.shape[0]
+        # Recover the un-padded block-grid extent from the valid mask. The
+        # dataset's `pad_to_multiple` pads at the right/bottom, so valid
+        # positions form a top-left rectangle of `[rows_used, cols_used]`.
+        valid_grid = valid.view(H_pad, W_pad)
+        rows_used = int(valid_grid.any(dim=1).sum().item())
+        cols_used = int(valid_grid.any(dim=0).sum().item())
+        assert rows_used * cols_used == n_blocks, (
+            f"Block-count mismatch for layer {layer_id_scalar}: "
+            f"{rows_used}*{cols_used} != {n_blocks}"
+        )
+
+        target = torch.zeros((H_pad, W_pad, D), device=device, dtype=torch.float32)
+        target[:rows_used, :cols_used] = orig_blocks.reshape(rows_used, cols_used, D)
+        target = target.reshape(N, D)
+
+        all_ids = torch.arange(K, device=device, dtype=torch.long)
+        layer_id_t = torch.tensor(layer_id_scalar, device=device, dtype=torch.long)
+
+        # ---- Pass 1: online (m, z, s) accumulation ----
+        m_run: torch.Tensor | None = None  # [N]
+        z_run: torch.Tensor | None = None  # [N]
+        s_run: torch.Tensor | None = None  # [N, D]
+        with torch.no_grad():
+            for start in range(0, K, chunk_size):
+                ids = all_ids[start : start + chunk_size]
+                chunk_logits = self._forward_chunk_layer_logits(
+                    ids, layer_id_t, n_rows, n_cols
+                ).float()  # [c, N]
+                c_max = chunk_logits.max(dim=0).values  # [N]
+                if m_run is None:
+                    new_m = c_max
+                    z_run = torch.zeros_like(new_m)
+                    s_run = torch.zeros((N, D), device=device)
+                else:
+                    new_m = torch.maximum(m_run, c_max)
+                    rescale = (m_run - new_m).exp()
+                    z_run = z_run * rescale  # type: ignore
+                    s_run = s_run * rescale.unsqueeze(-1)  # type: ignore
+                w_chunk = (chunk_logits - new_m).exp()  # [c, N]
+                z_run = z_run + w_chunk.sum(dim=0)  # type: ignore
+                s_run = s_run + torch.einsum("cn,cd->nd", w_chunk, motifs_flat[ids])  # type: ignore
+                m_run = new_m
+
+        assert m_run is not None and z_run is not None and s_run is not None
+        logZ = m_run + z_run.clamp(min=1e-30).log()  # [N]
+        m_soft = s_run / z_run.unsqueeze(-1).clamp(min=1e-30)  # [N, D]
+        residual = (m_soft - target) * valid_f.unsqueeze(-1)  # [N, D], 0 at invalid
+        b_term = (residual * m_soft).sum(dim=-1)  # [N]
+
+        # ---- Pass 2: chunked surrogate ----
+        opt = self.optimizers()
+        opt.zero_grad()
+
+        coef_norm = 2.0 / n_valid
+        train_loss_val = (residual.pow(2).sum() / n_valid).detach()
+        best_val = torch.full((N,), float("-inf"), device=device)
+        best_idx = torch.zeros(N, device=device, dtype=torch.long)
+
+        for start in range(0, K, chunk_size):
+            ids = all_ids[start : start + chunk_size]
+            chunk_logits = self._forward_chunk_layer_logits(
+                ids, layer_id_t, n_rows, n_cols
+            )  # [c, N], requires grad
+            chunk_f = chunk_logits.float()
+
+            with torch.no_grad():
+                p_chunk = (chunk_f.detach() - logZ.unsqueeze(0)).exp() * valid_f.unsqueeze(0)
+                a_term = torch.einsum("nd,cd->cn", residual, motifs_flat[ids])  # [c, N]
+                coef = p_chunk * (a_term - b_term.unsqueeze(0))  # [c, N], detached
+
+                cmax, cargmax = chunk_f.max(dim=0)
+                update = cmax > best_val
+                best_val = torch.where(update, cmax, best_val)
+                best_idx = torch.where(update, ids[cargmax], best_idx)
+
+            loss_chunk = coef_norm * (coef * chunk_f).sum()
+            self.manual_backward(loss_chunk)
+
+        opt.step()
+
+        with torch.no_grad():
+            train_acc = ((best_idx == grid_flat) & valid).sum().float() / n_valid
+
+        self.log("train/loss", train_loss_val, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train/acc", train_acc, on_step=False, on_epoch=True, prog_bar=True)
         return None
 

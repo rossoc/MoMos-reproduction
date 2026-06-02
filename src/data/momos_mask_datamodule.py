@@ -58,6 +58,9 @@ class MotifMaskDataset(Dataset):
         self.layer_grids = []
         self.layer_shapes = [spec[3] for spec in layers_specs]
         self.original_params = [spec[0].detach().clone() for spec in layers_specs]
+        # Per-layer original blocks: [num_blocks, motif_rows, motif_cols] in the
+        # same flat order as `grid.view(layer_h, layer_w)` (row-major).
+        self.layer_blocks = [b.detach().clone() for b in blocks]
         offset = 0
         for _, num_blocks, _, shape in layers_specs:
             layer_h = shape[0] // self.motif_rows
