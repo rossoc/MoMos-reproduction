@@ -1,0 +1,77 @@
+defaults:
+  - model: mamba
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+seed: 42
+epochs: 50
+accelerator: auto
+devices: 1
+data_dir: ./data
+log_dir: ./outputs
+prefix: "structured_momos"
+
+# Source checkpoint of the MoMos-quantized MLP. Only used to extract the motif
+# library and per-layer geometry — the hypernet is then trained from scratch
+# against the *task* (no mask supervision).
+checkpoint_path: ???
+
+# Hypernet output grid (must match what the source MLP was quantized with).
+rows: 4
+cols: 8
+motif_rows: 1
+motif_cols: 2
+
+# Hypernet config helpers (consumed by train script, not by Mamba directly).
+output_layers: 2
+motif_chunk_size: 16     # chunked Mamba forward (mem-savings via grad ckpt)
+
+# Image task data (CIFAR-10-shaped by default).
+task_dataset:
+  name: cifar10
+  num_classes: 10
+  in_channels: 3
+  img_size: 32
+  batch_size: 128
+  val_pct: 0.05
+  test_pct: 1.0
+  n_folds: 5
+  kfold_seed: 10
+  fold: 0
+
+# Gumbel-softmax + regularization schedule.
+gumbel:
+  hard: true
+  tau_start: 1.0
+  tau_end: 0.1
+
+regularization:
+  entropy_weight_start: 0.0
+  entropy_weight_end: 1.0e-2
+  load_balance_weight: 1.0e-3
+
+grad_clip: 1.0
+
+patience: null
+periodic_checkpoint: null
+metrics: []
+all_compression_metrics_binarized: false
+quantization:
+  enabled: false
+
+wandb:
+  enabled: false
+  project: momos-structured
+  entity: null
+  name: null
+  tags: []
+  log_model: false
+
+hydra:
+  output_subdir: null
+  run:
+    dir: ./outputs
+  sweep:
+    dir: ./outputs
+    subdir: ${hydra.job.name}

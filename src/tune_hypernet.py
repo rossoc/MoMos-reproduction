@@ -76,6 +76,9 @@ def _objective_factory(cfg: DictConfig):
         expand = int(cfg.model.get("expand", 2))
         if (hparams["hidden_size"] * expand) % hparams["num_heads"] != 0:
             raise optuna.TrialPruned()
+        head_dim = (hparams["hidden_size"] * expand) // hparams["num_heads"]
+        if head_dim < 8 or head_dim % 8 != 0:
+            raise optuna.TrialPruned()
         if hparams["hidden_size"] % hparams["n_groups"] != 0:
             raise optuna.TrialPruned()
 
@@ -92,7 +95,13 @@ def _objective_factory(cfg: DictConfig):
             raise
         except (RuntimeError, ValueError) as exc:
             msg = str(exc).lower()
-            if "out of memory" in msg or ("cuda" in msg and "memory" in msg):
+            is_oom = "out of memory" in msg or ("cuda" in msg and "memory" in msg)
+            is_stride = (
+                "multiples of 8" in msg
+                or "causal_conv1d" in msg
+                or "strides" in msg and "channel last" in msg
+            )
+            if is_oom or is_stride:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 raise optuna.TrialPruned() from exc

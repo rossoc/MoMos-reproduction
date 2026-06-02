@@ -59,12 +59,11 @@ class Mamba(nn.Module):
         self.layers = nn.ModuleList(
             [nn.Linear(hidden_size, hidden_size) for _ in range(output_layers)]
         )
+        self.output_head = nn.Linear(hidden_size, out_channels)
 
         import transformers.models.mamba2.modeling_mamba2 as _m2
 
         _m2.is_fast_path_available = False
-
-        self.output_head = nn.Linear(hidden_size, out_channels)
 
     def forward(self, motif, layer, n_rows, n_cols, row=0, col=0):
         device = self.row_embedding.weight.device
@@ -88,7 +87,7 @@ class Mamba(nn.Module):
         out = self.model(inputs_embeds=x)[0][:, 1:]
         for linear in self.layers:
             out = torch.sin(linear(out))
-        out = self.output_head(out)
+        out = torch.sin(self.output_head(out))
         if squeeze_batch:
             out = out.squeeze(0)
         return out
