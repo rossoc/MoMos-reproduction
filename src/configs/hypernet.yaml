@@ -8,6 +8,8 @@ seed: 42
 epochs: 50
 batch_size: 1
 motif_batch_size: 7
+loss_mode: bce # bce " chuncked_ce
+ce_chunk_size: 8
 accelerator: auto
 devices: 1
 data_dir: ./data

@@ -11,11 +11,15 @@ from quantizers.momos2d import pad_to_multiple
 
 
 class MotifMaskDataset(Dataset):
-    """Yields ((motif_idx, layer_idx, n_rows, n_cols), target_blocks).
+    """Yields training samples for the Mamba mask-predictor.
 
-    For every (motif, layer) pair, computes the binary mask
-    `(M2d_layer == motif_idx)`, partitions it into `rows x cols` blocks,
-    and flattens each block into the channel dimension of the target.
+    Two modes:
+      - ``per_motif`` (default): one item == one (motif, layer) pair, target is
+        the binary mask ``(grid == motif_idx)`` partitioned into ``rows x cols``
+        subblocks. Used with ``LayerBucketBatchSampler`` for BCE training.
+      - ``per_layer``: one item == one layer, target is the full motif-index
+        grid ``[H_pad, W_pad]`` (with ``-1`` for padded positions). Used with
+        chunked cross-entropy training in ``LitMamba``.
     """
 
     def __init__(
@@ -26,11 +30,15 @@ class MotifMaskDataset(Dataset):
         motif_rows: int,
         motif_cols: int,
         chunk_size=256,
+        mode: str = "per_motif",
     ):
         super().__init__()
         self.checkpoint_path = checkpoint_path
         self.rows = int(rows)
         self.cols = int(cols)
+        if mode not in ("per_motif", "per_layer"):
+            raise ValueError(f"Unknown mode {mode!r}; expected per_motif or per_layer.")
+        self.mode = mode
 
         model = load_model(checkpoint_path)
         if motif_rows is not None and motif_cols is not None:
@@ -70,9 +78,21 @@ class MotifMaskDataset(Dataset):
         self.n_cols_per_layer = [g.shape[1] // self.cols for g in self.layer_grids]
 
     def __len__(self):
+        if self.mode == "per_layer":
+            return self.n_layers
         return self.n_motifs * self.n_layers
 
     def __getitem__(self, index):
+        if self.mode == "per_layer":
+            layer_idx = index
+            grid = self.layer_grids[layer_idx]
+            inputs = (
+                torch.tensor(layer_idx, dtype=torch.long),
+                int(self.n_rows_per_layer[layer_idx]),
+                int(self.n_cols_per_layer[layer_idx]),
+            )
+            return inputs, grid.long()
+
         motif_idx = index // self.n_layers
         layer_idx = index % self.n_layers
 
@@ -143,6 +163,13 @@ def _layer_collate(samples):
     return (motif_ids, layer_id, n_rows, n_cols), targets
 
 
+def _per_layer_collate(samples):
+    """Collate one per_layer sample (batch_size must be 1) without adding a batch dim."""
+    assert len(samples) == 1, "per_layer mode requires batch_size=1"
+    (layer_id, n_rows, n_cols), grid = samples[0]
+    return (layer_id, n_rows, n_cols), grid
+
+
 class MotifMaskDataModule(L.LightningDataModule):
     def __init__(
         self,
@@ -154,6 +181,7 @@ class MotifMaskDataModule(L.LightningDataModule):
         batch_size: int = 1,
         runtime: dict | None = None,
         motif_batch_size: int | None = None,
+        mode: str = "per_motif",
     ):
         super().__init__()
         self.checkpoint_path = checkpoint_path
@@ -163,6 +191,7 @@ class MotifMaskDataModule(L.LightningDataModule):
         self.motif_cols = motif_cols
         self.batch_size = int(batch_size)
         self.motif_batch_size = motif_batch_size
+        self.mode = mode
         self.runtime = runtime or {
             "num_workers": 0,
             "pin_memory": False,
@@ -180,6 +209,7 @@ class MotifMaskDataModule(L.LightningDataModule):
             self.cols,
             motif_rows=self.motif_rows,
             motif_cols=self.motif_cols,
+            mode=self.mode,
         )
 
     def _build_dataloader(self, dataset, shuffle=False) -> DataLoader:
@@ -191,6 +221,12 @@ class MotifMaskDataModule(L.LightningDataModule):
             kwargs["persistent_workers"] = bool(self.runtime["persistent_workers"])
             if self.runtime["prefetch_factor"] is not None:
                 kwargs["prefetch_factor"] = int(self.runtime["prefetch_factor"])
+
+        if self.mode == "per_layer":
+            kwargs["batch_size"] = 1
+            kwargs["shuffle"] = shuffle
+            kwargs["collate_fn"] = _per_layer_collate
+            return DataLoader(dataset, **kwargs)  # type: ignore
 
         use_bucketed = self.motif_batch_size is not None and int(self.motif_batch_size) > 1
         if use_bucketed:

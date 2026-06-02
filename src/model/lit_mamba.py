@@ -46,11 +46,19 @@ class LitMamba(L.LightningModule):
         motif_batch_size: int | None = None,
         original_params: list | None = None,
         output_layers: int | None = None,
+        loss_mode: str = "bce",
+        ce_chunk_size: int | None = None,
     ):
         super().__init__()
         self.save_hyperparameters(
             ignore=["motifs", "layer_shapes", "image_datamodule", "original_params"]
         )
+        if loss_mode not in ("bce", "chunked_ce"):
+            raise ValueError(f"Unknown loss_mode {loss_mode!r}.")
+        self.loss_mode = loss_mode
+        self.ce_chunk_size = ce_chunk_size
+        if loss_mode == "chunked_ce":
+            self.automatic_optimization = False
 
         self.model = Mamba(
             n_motifs=n_motifs,
@@ -109,6 +117,9 @@ class LitMamba(L.LightningModule):
             )
 
     def training_step(self, batch, batch_idx):
+        if self.loss_mode == "chunked_ce":
+            return self._training_step_chunked_ce(batch, batch_idx)
+
         x, y = batch
         logits = self(x)
         loss = self.criterion(logits, y.float())
@@ -120,6 +131,122 @@ class LitMamba(L.LightningModule):
         self.log("train/acc", acc, on_step=False, on_epoch=True, prog_bar=True)
 
         return loss
+
+    def _forward_chunk_layer_logits(self, motif_ids, layer_id, n_rows, n_cols):
+        """Run the Mamba model for a motif chunk and reshape its output so the
+        flattened spatial dimension matches the layer grid layout ``[H_pad, W_pad]``.
+
+        Returns: ``[c, N]`` where ``N = (n_rows*rows) * (n_cols*cols)``.
+        """
+        out = self.model(motif_ids, layer_id, int(n_rows), int(n_cols))
+        c = out.shape[0]
+        rows = int(self.rows)  # type: ignore
+        cols = int(self.cols)  # type: ignore
+        # out: [c, n_rows*n_cols, rows*cols] -> [c, n_rows, n_cols, rows, cols]
+        out = out.view(c, int(n_rows), int(n_cols), rows, cols)
+        # match grid layout: [c, n_rows, rows, n_cols, cols] -> [c, H_pad, W_pad]
+        H_pad = int(n_rows) * rows
+        W_pad = int(n_cols) * cols
+        out = out.permute(0, 1, 3, 2, 4).reshape(c, H_pad * W_pad)
+        return out
+
+    def _training_step_chunked_ce(self, batch, batch_idx):
+        """Two-pass chunked cross-entropy over motifs at each spatial position.
+
+        Pass 1 (no grad): accumulate ``logZ[n] = logsumexp_k logits[k, n]`` chunk
+        by chunk via ``logaddexp``. Pass 2 (with grad): for each chunk, build a
+        surrogate loss whose gradient w.r.t. ``logits[k, n]`` equals the true CE
+        gradient ``softmax(k, n) - 1[k=k_true]``, and call ``manual_backward``
+        per chunk so only one chunk's activations are alive at a time.
+        """
+        (layer_id, n_rows, n_cols), grid = batch
+        if isinstance(layer_id, torch.Tensor):
+            layer_id_scalar = int(layer_id.item())
+        else:
+            layer_id_scalar = int(layer_id)
+        n_rows = int(n_rows.item()) if isinstance(n_rows, torch.Tensor) else int(n_rows)
+        n_cols = int(n_cols.item()) if isinstance(n_cols, torch.Tensor) else int(n_cols)
+        device = self.device
+
+        if self.motifs is None:
+            raise RuntimeError("chunked_ce requires `motifs` to be registered.")
+        K = int(self.motifs.shape[0])  # type: ignore
+        chunk_size = int(self.ce_chunk_size) if self.ce_chunk_size else K
+        chunk_size = max(1, min(chunk_size, K))
+
+        grid_flat = grid.reshape(-1).to(device=device, dtype=torch.long)  # [N]
+        valid = grid_flat >= 0
+        n_valid = valid.sum().clamp(min=1).float()
+
+        all_ids = torch.arange(K, device=device, dtype=torch.long)
+        layer_id_t = torch.tensor(layer_id_scalar, device=device, dtype=torch.long)
+
+        # ---- Pass 1: streaming logsumexp, no graph ----
+        # NOTE: stay in train() mode so pass-2 logits match pass-1's logZ
+        # exactly (the gradient identity relies on this).
+        logZ = None
+        with torch.no_grad():
+            for s in range(0, K, chunk_size):
+                ids = all_ids[s : s + chunk_size]
+                chunk_logits = self._forward_chunk_layer_logits(
+                    ids, layer_id_t, n_rows, n_cols
+                )  # [c, N]
+                chunk_lse = torch.logsumexp(chunk_logits.float(), dim=0)
+                logZ = chunk_lse if logZ is None else torch.logaddexp(logZ, chunk_lse)
+        assert logZ is not None
+
+        # ---- Pass 2: chunked surrogate loss + manual_backward per chunk ----
+        opt = self.optimizers()
+        opt.zero_grad()
+
+        total_loss_val = torch.zeros((), device=device)
+        total_correct = torch.zeros((), device=device, dtype=torch.long)
+        # Running argmax tracker for train accuracy
+        best_val = torch.full((grid_flat.numel(),), float("-inf"), device=device)
+        best_idx = torch.zeros(grid_flat.numel(), device=device, dtype=torch.long)
+
+        valid_f = valid.float()
+
+        for s in range(0, K, chunk_size):
+            ids = all_ids[s : s + chunk_size]
+            chunk_logits = self._forward_chunk_layer_logits(
+                ids, layer_id_t, n_rows, n_cols
+            )  # [c, N], requires grad
+            chunk_f = chunk_logits.float()
+
+            with torch.no_grad():
+                w = (chunk_f - logZ.unsqueeze(0)).exp() * valid_f.unsqueeze(0)  # softmax slice
+
+                # Update train-acc tracker
+                cmax, cargmax = chunk_f.max(dim=0)
+                update = cmax > best_val
+                best_val = torch.where(update, cmax, best_val)
+                best_idx = torch.where(update, ids[cargmax], best_idx)
+
+            # Surrogate term whose gradient is softmax(k,n) - 1[k=k_true]
+            in_chunk = (grid_flat.unsqueeze(0) == ids.unsqueeze(1)) & valid.unsqueeze(0)
+            neg = (w * chunk_f).sum()
+            pos = (chunk_f * in_chunk.float()).sum()
+            loss_chunk = (neg - pos) / n_valid
+
+            self.manual_backward(loss_chunk)
+
+            with torch.no_grad():
+                # True per-chunk loss-value contribution (logZ - logit_true on positions in chunk)
+                pos_val = (chunk_f.detach() * in_chunk.float()).sum()
+                logZ_val = (logZ * in_chunk.any(dim=0).float()).sum()
+                total_loss_val = total_loss_val + (logZ_val - pos_val)
+
+        opt.step()
+
+        with torch.no_grad():
+            total_correct = ((best_idx == grid_flat) & valid).sum()
+            train_loss = total_loss_val / n_valid
+            train_acc = total_correct.float() / n_valid
+
+        self.log("train/loss", train_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/acc", train_acc, on_step=False, on_epoch=True, prog_bar=True)
+        return None
 
     def build_mlp(
         self, motifs: torch.Tensor | None = None
@@ -217,6 +344,12 @@ class LitMamba(L.LightningModule):
 
     def on_train_epoch_end(self):
         """Reconstruct an MLP from predicted masks and evaluate on the validation fold."""
+        # Step the LR scheduler manually when running with manual optimization.
+        if not self.automatic_optimization:
+            sch = self.lr_schedulers()
+            if sch is not None:
+                sch.step()
+
         if self.image_datamodule is None or self.motifs is None:
             return
 
