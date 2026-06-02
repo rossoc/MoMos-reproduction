@@ -120,7 +120,6 @@ def run_training(cfg: DictConfig) -> float:
         entropy_weight_start=float(cfg.regularization.entropy_weight_start),
         entropy_weight_end=float(cfg.regularization.entropy_weight_end),
         load_balance_weight=float(cfg.regularization.load_balance_weight),
-        hard=bool(cfg.gumbel.hard),
         # Memory
         motif_chunk_size=cfg.get("motif_chunk_size", None),
         mamba_chunk_size=cfg.get("mamba_chunk_size", None),

@@ -51,9 +51,10 @@ task_dataset:
   kfold_seed: 10
   fold: 0
 
-# Gumbel-softmax + regularization schedule.
+# Softmax temperature schedule (annealed across epochs). Forward W is a soft
+# convex combination of motifs: W = softmax(logits/tau) @ M. Lower tau peaks
+# the mix toward a single motif per position.
 gumbel:
-  hard: true
   tau_start: 1.0
   tau_end: 0.1
 

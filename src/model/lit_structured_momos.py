@@ -1,21 +1,22 @@
 """Lightning module: train the Mamba hypernetwork to *propose* a fresh MLP.
 
-Departure from ``LitMamba``: the hypernet no longer regresses the original
-mask grid. Instead, at every training step it emits a categorical distribution
-over motifs at each spatial position; Gumbel-softmax (straight-through) turns
-those distributions into a near-one-hot, differentiable motif selection; the
-selected motifs are tiled back into MLP weight tensors; the resulting MLP is
-called on a task batch via ``torch.func.functional_call``; classification CE
-flows back through the weights → masks → hypernet.
+At every training step the hypernet emits per-position logits over motifs,
+which are turned into a soft (τ-tempered) convex combination of motifs —
+``W = softmax(logits / τ) @ M`` — tiled into MLP weight tensors. The target
+MLP is called on a task batch via ``torch.func.functional_call`` and CE
+flows back through the weights → softmax → hypernet, end-to-end
+differentiable.
 
-Regularization pushes the mask distribution toward a true one-hot:
+The softmax temperature ``tau`` is annealed linearly from ``tau_start`` to
+``tau_end`` over the configured number of epochs — lower τ peaks the mix
+toward a single motif per position.
 
-* **Entropy penalty** on the per-position softmax — annealed up over training.
-* **Load-balance KL** between the average motif usage and a uniform prior — a
-  small constant — to discourage collapse onto one or two motifs.
-
-The Gumbel temperature ``tau`` is annealed linearly from ``tau_start`` to
-``tau_end`` over the configured number of epochs.
+Macro-batched updates: ``hypernet_update_every`` task batches share one set
+of hypernet-generated weights (held as detached autograd leaves); their CE
+gradients accumulate on those leaves, then ``_flush_macro_batch`` re-runs
+the soft motif mix with grad enabled and does an exact VJP back into the
+hypernet. The soft mix is deterministic in the hypernet params, so the
+recompute is bit-identical to the leaf.
 
 Memory: per-layer Mamba forwards over all ``K`` motifs are split into chunks
 of ``motif_chunk_size`` and wrapped in ``torch.utils.checkpoint`` so only one
@@ -77,7 +78,6 @@ class LitStructuredMomos(L.LightningModule):
         entropy_weight_start: float = 0.0,
         entropy_weight_end: float = 1e-2,
         load_balance_weight: float = 1e-3,
-        hard: bool = True,
         # --- Memory ---
         motif_chunk_size: int | None = None,
         mamba_chunk_size: int | None = None,
@@ -213,71 +213,65 @@ class LitStructuredMomos(L.LightningModule):
         nbw = (orig_w + self.motif_cols - 1) // self.motif_cols
         return nbh, nbw
 
-    def _generate_weights(self, hard: bool) -> dict[str, torch.Tensor]:
-        """Build the ``functional_call`` weight dict.
-
-        Args:
-            hard: if True, use Gumbel-softmax STE (one-hot forward, soft
-                gradient); if False, use plain softmax (validation).
-
-        Returns:
-            weight_dict
-        """
-        tau = self._tau()
-        weight_dict: dict[str, torch.Tensor] = {}
-
-        for L_idx, name in enumerate(self._target_param_names):
-            logits = self._layer_logits(L_idx)  # [K, nbh, nbw]
-
-            if hard:
-                weights = F.gumbel_softmax(logits, tau=tau, hard=True, dim=0)
-            else:
-                weights = F.softmax(logits, dim=0)
-
-            # Z @ M -> W: [nbh, nbw, D]
-            blocks = torch.einsum("kd,khw->hwd", self.motifs, weights)
-            blocks = blocks.view(blocks.shape[0] * blocks.shape[1], -1)
-
-            weight_dict[name] = blocks_to_tensor2D(
-                blocks, self.layer_shapes[L_idx], self.motif_rows, self.motif_cols
-            )
-
-        return weight_dict
+    def _assemble_param(
+        self, layer_idx: int, mix: torch.Tensor
+    ) -> torch.Tensor:
+        """Tile ``[K, nbh, nbw]`` motif weights into the layer's parameter shape."""
+        blocks = torch.einsum("kd,khw->hwd", self.motifs, mix)  # [nbh, nbw, D]
+        nbh, nbw = self._layer_block_counts(layer_idx)
+        blocks = blocks.view(nbh * nbw, self.D)
+        return blocks_to_tensor2D(
+            blocks, self.layer_shapes[layer_idx], self.motif_rows, self.motif_cols
+        )
 
     # --------------------- lightning hooks ---------------------------------
     def on_train_epoch_start(self):
         self._macro_step = 0
         self._W_leaves = {}
 
+    def _soft_weights(self, layer_idx: int) -> torch.Tensor:
+        """Soft (τ-tempered) motif mix for one layer: ``W = softmax(logits/τ) @ M``."""
+        logits = self._layer_logits(layer_idx)                  # [K, nbh, nbw]
+        soft = F.softmax(logits / self._tau(), dim=0)
+        return self._assemble_param(layer_idx, soft)
+
     def _start_macro_batch(self) -> None:
         """Materialize fresh, detached weight leaves for a new macro-batch.
 
-        Soft path (``hard=False``) is deterministic in the hypernet params, so
-        no RNG bookkeeping is needed: the flush step re-runs `_generate_weights`
-        with grad enabled and gets the same tensors back.
+        Weights are a *soft* (τ-tempered) convex combination of motifs:
+        ``W = softmax(logits/τ) @ M``. This is deterministic in the hypernet
+        params, so the flush step can re-run the same computation with grad
+        enabled and get bit-identical outputs — the VJP is exact.
         """
+        self._W_leaves = {}
         with torch.no_grad():
-            W = self._generate_weights(hard=False)
-        self._W_leaves = {
-            name: w.detach().clone().requires_grad_(True) for name, w in W.items()
-        }
+            for L_idx, name in enumerate(self._target_param_names):
+                W = self._soft_weights(L_idx)
+                self._W_leaves[name] = W.detach().clone().requires_grad_(True)
 
     def _flush_macro_batch(self, optimizer) -> None:
-        """Push accumulated upstream grads on ``W_leaves`` back into the hypernet."""
+        """Push accumulated upstream grads on ``W_leaves`` into the hypernet.
+
+        Re-runs the soft motif mix with grad enabled — forward is bit-identical
+        to the leaf the target MLP was forwarded on, so the VJP exactly equals
+        the gradient at that operating point.
+        """
         if not self._W_leaves:
             return
 
         names = list(self._W_leaves.keys())
         upstream = [self._W_leaves[n].grad for n in names]
-        # If no task batch contributed (shouldn't happen, but be defensive).
-        if any(g is None for g in upstream):
+        if any(grad is None for grad in upstream):
+            # Macro started but no task batch contributed — bail.
             self._W_leaves = {}
             return
 
-        W = self._generate_weights(hard=False)
-        outputs = [W[n] for n in names]
+        outputs = [
+            self._soft_weights(L_idx)
+            for L_idx, name in enumerate(self._target_param_names)
+            if name in self._W_leaves
+        ]
         params = [p for p in self.hypernet.parameters() if p.requires_grad]
-
         grads = torch.autograd.grad(
             outputs=outputs,
             inputs=params,
@@ -285,13 +279,13 @@ class LitStructuredMomos(L.LightningModule):
             allow_unused=True,
         )
 
-        for p, g in zip(params, grads):
-            if g is None:
+        for p, gg in zip(params, grads):
+            if gg is None:
                 continue
             if p.grad is None:
-                p.grad = g.detach().clone()
+                p.grad = gg.detach().clone()
             else:
-                p.grad.add_(g)
+                p.grad.add_(gg)
 
         clip = float(self.hparams.grad_clip)  # type: ignore[attr-defined]
         if clip and clip > 0:
@@ -350,18 +344,10 @@ class LitStructuredMomos(L.LightningModule):
         hypernet params, so per-batch recomputation is pure waste.
         """
         with torch.no_grad():
-            weight_dict: dict[str, torch.Tensor] = {}
-            for L_idx, name in enumerate(self._target_param_names):
-                logits = self._layer_logits(L_idx)  # already cropped to [K, nbh, nbw]
-                idx = logits.argmax(dim=0)  # [nbh, nbw]
-                blocks = self.motifs[idx]  # type: ignore[index]
-                weight_dict[name] = blocks_to_tensor2D(
-                    blocks,
-                    self.layer_shapes[L_idx],
-                    self.motif_rows,
-                    self.motif_cols,
-                )
-        self._val_weight_dict = weight_dict
+            self._val_weight_dict = {
+                name: self._soft_weights(L_idx)
+                for L_idx, name in enumerate(self._target_param_names)
+            }
 
     def on_validation_epoch_end(self):
         self._val_weight_dict = None
