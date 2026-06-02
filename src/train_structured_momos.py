@@ -123,6 +123,7 @@ def run_training(cfg: DictConfig) -> float:
         hard=bool(cfg.gumbel.hard),
         # Memory
         motif_chunk_size=cfg.get("motif_chunk_size", None),
+        mamba_chunk_size=cfg.get("mamba_chunk_size", None),
     )
 
     # 5. Checkpoints + callbacks + (optional) WandB.
@@ -166,6 +167,10 @@ def run_training(cfg: DictConfig) -> float:
         enable_progress_bar=True,
         enable_model_summary=True,
         deterministic=True,
+        # Sanity-check val runs *before* training and uses the same path as the
+        # real val step (full-K Mamba per layer). Skip it — the proper val at
+        # the end of epoch 0 will catch real bugs.
+        num_sanity_val_steps=0,
     )
 
     trainer.fit(model, datamodule=img_dm)

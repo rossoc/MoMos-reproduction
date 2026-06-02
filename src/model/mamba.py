@@ -21,9 +21,10 @@ class Mamba(nn.Module):
         time_step_max,
         out_channels,
         output_layers,
+        mamba_chunk_size=None,
     ):
         super().__init__()
-        config = Mamba2Config(
+        mamba_kwargs = dict(
             output_hidden_states=False,
             num_heads=num_heads,
             head_dim=head_dim,
@@ -39,6 +40,12 @@ class Mamba(nn.Module):
             bos_token_id=1,
             eos_token_id=2,
         )
+        # Mamba2's torch_forward materializes [B, H, n_chunks, C, C, head_dim]
+        # tensors in the SSD diagonal term — C = ``chunk_size`` is the dominant
+        # squared factor, so lower it for long input sequences.
+        if mamba_chunk_size is not None:
+            mamba_kwargs["chunk_size"] = int(mamba_chunk_size)
+        config = Mamba2Config(**mamba_kwargs)
 
         self._hidden_size = hidden_size
 

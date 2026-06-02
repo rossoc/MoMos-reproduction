@@ -80,6 +80,7 @@ class LitStructuredMomos(L.LightningModule):
         hard: bool = True,
         # --- Memory ---
         motif_chunk_size: int | None = None,
+        mamba_chunk_size: int | None = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["motifs", "layer_shapes"])
@@ -100,6 +101,7 @@ class LitStructuredMomos(L.LightningModule):
             time_step_max=time_step_max,
             out_channels=out_channels,
             output_layers=output_layers,
+            mamba_chunk_size=mamba_chunk_size,
         )
 
         # Target MLP: a structural shell. Its parameters are *replaced* per step

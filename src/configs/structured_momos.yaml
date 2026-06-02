@@ -25,7 +25,11 @@ motif_cols: 2
 
 # Hypernet config helpers (consumed by train script, not by Mamba directly).
 output_layers: 2
-motif_chunk_size: 16     # chunked Mamba forward (mem-savings via grad ckpt)
+# Memory knobs (tune down if you OOM on the largest MLP layer):
+#   motif_chunk_size: motifs processed in one Mamba call (linear in mem).
+#   mamba_chunk_size: SSD chunk inside Mamba2 (quadratic in mem; default 256).
+motif_chunk_size: 4
+mamba_chunk_size: 64
 
 # Image task data (CIFAR-10-shaped by default).
 task_dataset:
