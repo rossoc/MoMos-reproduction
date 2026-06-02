@@ -94,8 +94,8 @@ class Mamba(nn.Module):
 
         out = self.model(inputs_embeds=x)[0][:, 1:]
         for linear in self.layers:
-            out = nn.ReLU(linear(out))
-        out = self.output_head(out)
+            out = self.relu(linear(out))
+        out = self.relu(self.output_head(out))
         if squeeze_batch:
             out = out.squeeze(0)
         return out
