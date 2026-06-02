@@ -28,6 +28,7 @@ import torch
 import torch.nn.functional as F
 import lightning as L
 from torch.func import functional_call
+from torch.utils.checkpoint import checkpoint
 
 from .mamba import Mamba
 from .lit_module import LitMLP
@@ -80,9 +81,14 @@ class LitStructuredMomos(L.LightningModule):
         # --- Memory ---
         motif_chunk_size: int | None = None,
         mamba_chunk_size: int | None = None,
+        # --- Macro-batched hypernet updates ---
+        hypernet_update_every: int = 1,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["motifs", "layer_shapes"])
+        # Manual optimization: we drive optimizer.step() ourselves so a single
+        # chunked hypernet backward can amortize many cheap target-MLP steps.
+        self.automatic_optimization = False
 
         self.hypernet = Mamba(
             n_motifs=n_motifs,
@@ -126,6 +132,11 @@ class LitStructuredMomos(L.LightningModule):
         self.D = self.motif_rows * self.motif_cols
         self.best_val_acc = 0.0
 
+        self.motif_chunk_size = motif_chunk_size
+        self.hypernet_update_every = max(1, int(hypernet_update_every))
+        self._macro_step = 0
+        self._W_leaves: dict[str, torch.Tensor] = {}
+
         self.register_buffer(
             "motifs", motifs.reshape(self.K, self.D).detach().clone(), persistent=False
         )
@@ -158,24 +169,40 @@ class LitStructuredMomos(L.LightningModule):
         padded grid of size ``n_rows_per_layer[layer_idx] * self.rows`` by
         ``n_cols_per_layer[layer_idx] * self.cols``; this function crops it to the
         true ``(nbh, nbw)`` derived from ``layer_shapes[layer_idx]``.
+
+        When grad is enabled and ``motif_chunk_size < K``, the K motifs are split
+        into chunks and each chunk's forward is wrapped in
+        ``torch.utils.checkpoint`` so peak activation memory stays bounded by
+        one chunk.
         """
         device = self.device
         n_rows = self.n_rows_per_layer[layer_idx]
         n_cols = self.n_cols_per_layer[layer_idx]
         layer_id = torch.tensor(layer_idx, device=device, dtype=torch.long)
-        all_ids = torch.arange(self.K, device=device, dtype=torch.long)
-
-        out = self.hypernet(all_ids, layer_id, n_rows, n_cols)
-        c = out.shape[0]
-        out = out.view(c, n_rows, n_cols, self.rows, self.cols)
-
+        nbh, nbw = self._layer_block_counts(layer_idx)
         H_pad = n_rows * self.rows
         W_pad = n_cols * self.cols
-        logits = out.permute(0, 1, 3, 2, 4).reshape(c, H_pad, W_pad)
 
-        nbh, nbw = self._layer_block_counts(layer_idx)
-        logits = logits[:, :nbh, :nbw]  # crop pad
-        return logits
+        chunk = self.motif_chunk_size or self.K
+        chunk = max(1, min(int(chunk), self.K))
+        use_ckpt = torch.is_grad_enabled() and chunk < self.K
+
+        def _run(ids: torch.Tensor) -> torch.Tensor:
+            out = self.hypernet(ids, layer_id, n_rows, n_cols)
+            c = out.shape[0]
+            out = out.view(c, n_rows, n_cols, self.rows, self.cols)
+            out = out.permute(0, 1, 3, 2, 4).reshape(c, H_pad, W_pad)
+            return out[:, :nbh, :nbw].contiguous()
+
+        all_ids = torch.arange(self.K, device=device, dtype=torch.long)
+        pieces = []
+        for start in range(0, self.K, chunk):
+            ids = all_ids[start : start + chunk]
+            if use_ckpt:
+                pieces.append(checkpoint(_run, ids, use_reentrant=False))
+            else:
+                pieces.append(_run(ids))
+        return torch.cat(pieces, dim=0)
 
     # --------------------- weight generation -------------------------------
     def _layer_block_counts(self, layer_idx: int) -> tuple[int, int]:
@@ -217,24 +244,90 @@ class LitStructuredMomos(L.LightningModule):
         return weight_dict
 
     # --------------------- lightning hooks ---------------------------------
-    def training_step(self, batch, batch_idx):
-        x, y = batch
-        weight_dict = self._generate_weights(
-            hard=bool(self.hparams.hard),  # type: ignore[attr-defined]
+    def on_train_epoch_start(self):
+        self._macro_step = 0
+        self._W_leaves = {}
+
+    def _start_macro_batch(self) -> None:
+        """Materialize fresh, detached weight leaves for a new macro-batch.
+
+        Soft path (``hard=False``) is deterministic in the hypernet params, so
+        no RNG bookkeeping is needed: the flush step re-runs `_generate_weights`
+        with grad enabled and gets the same tensors back.
+        """
+        with torch.no_grad():
+            W = self._generate_weights(hard=False)
+        self._W_leaves = {
+            name: w.detach().clone().requires_grad_(True) for name, w in W.items()
+        }
+
+    def _flush_macro_batch(self, optimizer) -> None:
+        """Push accumulated upstream grads on ``W_leaves`` back into the hypernet."""
+        if not self._W_leaves:
+            return
+
+        names = list(self._W_leaves.keys())
+        upstream = [self._W_leaves[n].grad for n in names]
+        # If no task batch contributed (shouldn't happen, but be defensive).
+        if any(g is None for g in upstream):
+            self._W_leaves = {}
+            return
+
+        W = self._generate_weights(hard=False)
+        outputs = [W[n] for n in names]
+        params = [p for p in self.hypernet.parameters() if p.requires_grad]
+
+        grads = torch.autograd.grad(
+            outputs=outputs,
+            inputs=params,
+            grad_outputs=upstream,
+            allow_unused=True,
         )
 
-        logits = functional_call(self.target, weight_dict, (x,))
-        task_loss = F.cross_entropy(logits, y)
+        for p, g in zip(params, grads):
+            if g is None:
+                continue
+            if p.grad is None:
+                p.grad = g.detach().clone()
+            else:
+                p.grad.add_(g)
 
-        loss = task_loss
+        clip = float(self.hparams.grad_clip)  # type: ignore[attr-defined]
+        if clip and clip > 0:
+            self.clip_gradients(
+                optimizer,
+                gradient_clip_val=clip,
+                gradient_clip_algorithm="norm",
+            )
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+
+        self._W_leaves = {}
+
+    def training_step(self, batch, batch_idx):
+        opt = self.optimizers()
+
+        if self._macro_step == 0:
+            self._start_macro_batch()
+
+        x, y = batch
+        logits = functional_call(self.target, self._W_leaves, (x,))
+        task_loss = F.cross_entropy(logits, y)
+        # Only walks the cheap target-MLP graph; accumulates into W_leaves.grad.
+        self.manual_backward(task_loss)
 
         with torch.no_grad():
             acc = logits.argmax(dim=1).eq(y).float().mean()
 
+        self._macro_step += 1
+        last_in_epoch = (batch_idx + 1) == self.trainer.num_training_batches
+        if self._macro_step >= self.hypernet_update_every or last_in_epoch:
+            self._flush_macro_batch(opt)
+            self._macro_step = 0
+
         self.log_dict(
             {
-                "train/loss": loss,
-                "train/task_loss": task_loss,
+                "train/loss": task_loss,
                 "train/acc": acc,
                 "train/tau": self._tau(),
             },
@@ -242,7 +335,12 @@ class LitStructuredMomos(L.LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
-        return loss
+        return task_loss
+
+    def on_train_epoch_end(self):
+        sch = self.lr_schedulers()
+        if sch is not None:
+            sch.step()
 
     def validation_step(self, batch, batch_idx):
         x, y = batch

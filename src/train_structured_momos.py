@@ -124,6 +124,8 @@ def run_training(cfg: DictConfig) -> float:
         # Memory
         motif_chunk_size=cfg.get("motif_chunk_size", None),
         mamba_chunk_size=cfg.get("mamba_chunk_size", None),
+        # Macro-batched hypernet updates
+        hypernet_update_every=int(cfg.get("hypernet_update_every", 1)),
     )
 
     # 5. Checkpoints + callbacks + (optional) WandB.
