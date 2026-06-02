@@ -57,8 +57,13 @@ class Mamba(nn.Module):
 
         self.model = Mamba2Model(config)
         self.layers = nn.ModuleList(
-            [nn.Linear(hidden_size, out_channels) for _ in range(output_layers)]
+            [nn.Linear(hidden_size, hidden_size) for _ in range(output_layers)]
         )
+
+        import transformers.models.mamba2.modeling_mamba2 as _m2
+
+        _m2.is_fast_path_available = False
+
         self.output_head = nn.Linear(hidden_size, out_channels)
 
     def forward(self, motif, layer, n_rows, n_cols, row=0, col=0):
