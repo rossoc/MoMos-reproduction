@@ -28,7 +28,6 @@ import torch
 import torch.nn.functional as F
 import lightning as L
 from torch.func import functional_call
-from torch.utils.checkpoint import checkpoint
 
 from .mamba import Mamba
 from .lit_module import LitMLP
@@ -55,8 +54,8 @@ class LitStructuredMomos(L.LightningModule):
         out_channels: int,
         output_layers: int,
         # --- Motif library + layer geometry (from MotifMaskDataset) ---
-        motifs: torch.Tensor,             # [K, motif_rows, motif_cols]
-        layer_shapes: list,               # per-param original shapes
+        motifs: torch.Tensor,  # [K, motif_rows, motif_cols]
+        layer_shapes: list,  # per-param original shapes
         motif_rows: int,
         motif_cols: int,
         rows: int,
@@ -115,20 +114,21 @@ class LitStructuredMomos(L.LightningModule):
             name for name, _ in target.named_parameters()
         ]
 
-        # Motif library — non-trainable buffer.
-        self.register_buffer("motifs", motifs.detach().clone(), persistent=False)
-
         self.layer_shapes = list(layer_shapes)
         self.motif_rows = int(motif_rows)
         self.motif_cols = int(motif_cols)
         self.rows = int(rows)
         self.cols = int(cols)
-        self.n_rows_per_layer = [int(v) for v in n_rows_per_layer]
-        self.n_cols_per_layer = [int(v) for v in n_cols_per_layer]
+        self.n_rows_per_layer = n_rows_per_layer
+        self.n_cols_per_layer = n_cols_per_layer
 
         self.K = int(motifs.shape[0])
         self.D = self.motif_rows * self.motif_cols
         self.best_val_acc = 0.0
+
+        self.register_buffer(
+            "motifs", motifs.reshape(self.K, self.D).detach().clone(), persistent=False
+        )
 
         if len(self._target_param_names) != len(self.layer_shapes):
             raise ValueError(
@@ -149,35 +149,15 @@ class LitStructuredMomos(L.LightningModule):
         h = self.hparams
         return float(h.tau_start + (h.tau_end - h.tau_start) * self._progress())  # type: ignore[attr-defined]
 
-    def _entropy_weight(self) -> float:
-        h = self.hparams
-        return float(
-            h.entropy_weight_start  # type: ignore[attr-defined]
-            + (h.entropy_weight_end - h.entropy_weight_start) * self._progress()  # type: ignore[attr-defined]
-        )
-
     # --------------------- hypernet forward --------------------------------
-    def _hypernet_chunk(
-        self,
-        motif_ids: torch.Tensor,
-        layer_id: torch.Tensor,
-        n_rows: int,
-        n_cols: int,
-    ) -> torch.Tensor:
-        """One Mamba call reshaped to ``[c, H_pad, W_pad]`` logits."""
-        out = self.hypernet(motif_ids, layer_id, n_rows, n_cols)
-        c = out.shape[0]
-        out = out.view(c, n_rows, n_cols, self.rows, self.cols)
-        H_pad = n_rows * self.rows
-        W_pad = n_cols * self.cols
-        return out.permute(0, 1, 3, 2, 4).reshape(c, H_pad, W_pad)
-
     def _layer_logits(self, layer_idx: int) -> torch.Tensor:
-        """Return ``[K, H_pad, W_pad]`` logits for one MLP layer.
+        """Return ``[K, nbh, nbw]`` pre-softmax logits for one target MLP layer.
 
-        Motifs are processed in chunks of ``motif_chunk_size`` and each chunk's
-        Mamba forward is wrapped in gradient checkpointing during training, so
-        only one chunk's activations live at a time.
+        ``logits[k, i, j]`` is the unnormalized score for placing motif ``k`` at
+        block position ``(i, j)`` of the layer's block grid. The hypernet emits a
+        padded grid of size ``n_rows_per_layer[layer_idx] * self.rows`` by
+        ``n_cols_per_layer[layer_idx] * self.cols``; this function crops it to the
+        true ``(nbh, nbw)`` derived from ``layer_shapes[layer_idx]``.
         """
         device = self.device
         n_rows = self.n_rows_per_layer[layer_idx]
@@ -185,25 +165,17 @@ class LitStructuredMomos(L.LightningModule):
         layer_id = torch.tensor(layer_idx, device=device, dtype=torch.long)
         all_ids = torch.arange(self.K, device=device, dtype=torch.long)
 
-        chunk = self.hparams.motif_chunk_size or self.K  # type: ignore[attr-defined]
-        chunk = max(1, min(int(chunk), self.K))
+        out = self.hypernet(all_ids, layer_id, n_rows, n_cols)
+        c = out.shape[0]
+        out = out.view(c, n_rows, n_cols, self.rows, self.cols)
 
-        parts: list[torch.Tensor] = []
-        for s in range(0, self.K, chunk):
-            ids = all_ids[s : s + chunk]
-            if self.training and chunk < self.K:
-                out = checkpoint(
-                    self._hypernet_chunk,
-                    ids,
-                    layer_id,
-                    n_rows,
-                    n_cols,
-                    use_reentrant=False,
-                )
-            else:
-                out = self._hypernet_chunk(ids, layer_id, n_rows, n_cols)
-            parts.append(out)
-        return torch.cat(parts, dim=0)
+        H_pad = n_rows * self.rows
+        W_pad = n_cols * self.cols
+        logits = out.permute(0, 1, 3, 2, 4).reshape(c, H_pad, W_pad)
+
+        nbh, nbw = self._layer_block_counts(layer_idx)
+        logits = logits[:, :nbh, :nbw]  # crop pad
+        return logits
 
     # --------------------- weight generation -------------------------------
     def _layer_block_counts(self, layer_idx: int) -> tuple[int, int]:
@@ -213,93 +185,48 @@ class LitStructuredMomos(L.LightningModule):
         nbw = (orig_w + self.motif_cols - 1) // self.motif_cols
         return nbh, nbw
 
-    def _assemble_param(
-        self, layer_idx: int, soft_blocks: torch.Tensor
-    ) -> torch.Tensor:
-        """Tile blended ``[nbh, nbw, D]`` blocks into the layer's parameter shape."""
-        nbh, nbw = self._layer_block_counts(layer_idx)
-        blocks = soft_blocks.reshape(nbh * nbw, self.D)
-        return blocks_to_tensor2D(
-            blocks, self.layer_shapes[layer_idx], self.motif_rows, self.motif_cols
-        )
-
-    def _generate_weights(
-        self, hard: bool, with_reg: bool
-    ) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
-        """Build the ``functional_call`` weight dict and regularization stats.
+    def _generate_weights(self, hard: bool) -> dict[str, torch.Tensor]:
+        """Build the ``functional_call`` weight dict.
 
         Args:
             hard: if True, use Gumbel-softmax STE (one-hot forward, soft
                 gradient); if False, use plain softmax (validation).
-            with_reg: when False, returned entropy/usage tensors are zeros —
-                we skip the extra log/softmax pass at val time.
 
         Returns:
-            ``(weight_dict, mean_entropy_per_position, mean_usage_over_K)``.
+            weight_dict
         """
         tau = self._tau()
-        motifs_flat = self.motifs.view(self.K, self.D).to(  # type: ignore[union-attr]
-            dtype=self.hypernet.motif_embedding.weight.dtype
-        )
-
         weight_dict: dict[str, torch.Tensor] = {}
-        ent_sum = torch.zeros((), device=self.device)
-        usage_sum = torch.zeros(self.K, device=self.device)
-        n_layers_counted = 0
 
         for L_idx, name in enumerate(self._target_param_names):
-            logits = self._layer_logits(L_idx)             # [K, H_pad, W_pad]
-            nbh, nbw = self._layer_block_counts(L_idx)
-            logits = logits[:, :nbh, :nbw]                 # crop pad
+            logits = self._layer_logits(L_idx)  # [K, nbh, nbw]
 
-            # Per-position categorical over motifs.
-            flat = logits.permute(1, 2, 0).reshape(-1, self.K)  # [P, K]
             if hard:
-                weights = F.gumbel_softmax(flat, tau=tau, hard=True, dim=-1)
+                weights = F.gumbel_softmax(logits, tau=tau, hard=True, dim=0)
             else:
-                weights = F.softmax(flat, dim=-1)
-            weights = weights.view(nbh, nbw, self.K)
+                weights = F.softmax(logits, dim=0)
 
-            # Blend motifs at each position: [nbh, nbw, D]
-            blocks = torch.einsum("hwk,kd->hwd", weights, motifs_flat)
-            weight_dict[name] = self._assemble_param(L_idx, blocks)
+            # Z @ M -> W: [nbh, nbw, D]
+            blocks = torch.einsum("kd,khw->hwd", self.motifs, weights)
+            blocks = blocks.view(blocks.shape[0] * blocks.shape[1], -1)
 
-            if with_reg:
-                # Plain softmax (no Gumbel noise) so the regularizer signal
-                # isn't dominated by sampling. Gradient still flows through.
-                probs = F.softmax(flat, dim=-1)
-                ent = -(probs * probs.clamp_min(1e-12).log()).sum(-1).mean()
-                ent_sum = ent_sum + ent
-                usage_sum = usage_sum + probs.mean(dim=0)
-                n_layers_counted += 1
+            weight_dict[name] = blocks_to_tensor2D(
+                blocks, self.layer_shapes[L_idx], self.motif_rows, self.motif_cols
+            )
 
-        if n_layers_counted == 0:
-            return weight_dict, ent_sum, usage_sum
-        return (
-            weight_dict,
-            ent_sum / n_layers_counted,
-            usage_sum / n_layers_counted,
-        )
+        return weight_dict
 
     # --------------------- lightning hooks ---------------------------------
     def training_step(self, batch, batch_idx):
         x, y = batch
-        weight_dict, mean_entropy, mean_usage = self._generate_weights(
-            hard=bool(self.hparams.hard), with_reg=True  # type: ignore[attr-defined]
+        weight_dict = self._generate_weights(
+            hard=bool(self.hparams.hard),  # type: ignore[attr-defined]
         )
 
         logits = functional_call(self.target, weight_dict, (x,))
         task_loss = F.cross_entropy(logits, y)
 
-        # KL(mean_usage || uniform) — small constant prior, encourages spread.
-        uniform = torch.full_like(mean_usage, 1.0 / self.K)
-        lb = (
-            mean_usage * (mean_usage.clamp_min(1e-12).log() - uniform.log())
-        ).sum()
-
-        ent_w = self._entropy_weight()
-        lb_w = float(self.hparams.load_balance_weight)  # type: ignore[attr-defined]
-        loss = task_loss + ent_w * mean_entropy + lb_w * lb
+        loss = task_loss
 
         with torch.no_grad():
             acc = logits.argmax(dim=1).eq(y).float().mean()
@@ -309,10 +236,8 @@ class LitStructuredMomos(L.LightningModule):
                 "train/loss": loss,
                 "train/task_loss": task_loss,
                 "train/entropy": mean_entropy,
-                "train/load_balance": lb,
                 "train/acc": acc,
                 "train/tau": self._tau(),
-                "train/entropy_weight": ent_w,
             },
             on_step=False,
             on_epoch=True,
@@ -327,8 +252,8 @@ class LitStructuredMomos(L.LightningModule):
         for L_idx, name in enumerate(self._target_param_names):
             logits = self._layer_logits(L_idx)
             nbh, nbw = self._layer_block_counts(L_idx)
-            idx = logits[:, :nbh, :nbw].argmax(dim=0)            # [nbh, nbw]
-            blocks = self.motifs[idx].reshape(nbh * nbw, self.D)  # type: ignore[index]
+            idx = logits[:, :nbh, :nbw].argmax(dim=0)  # [nbh, nbw]
+            blocks = self.motifs[idx]  # type: ignore[index]
             weight_dict[name] = blocks_to_tensor2D(
                 blocks,
                 self.layer_shapes[L_idx],
@@ -349,11 +274,12 @@ class LitStructuredMomos(L.LightningModule):
     def configure_optimizers(self):
         opt = torch.optim.AdamW(
             self.hypernet.parameters(),
-            lr=self.hparams.learning_rate,         # type: ignore[attr-defined]
-            weight_decay=self.hparams.weight_decay, # type: ignore[attr-defined]
+            lr=self.hparams.learning_rate,  # type: ignore[attr-defined]
+            weight_decay=self.hparams.weight_decay,  # type: ignore[attr-defined]
         )
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(
-            opt, T_max=self.hparams.epochs  # type: ignore[attr-defined]
+            opt,
+            T_max=self.hparams.epochs,  # type: ignore[attr-defined]
         )
         return {
             "optimizer": opt,
