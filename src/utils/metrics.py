@@ -3,7 +3,7 @@ import gzip
 import lzma
 import numpy as np
 import warnings
-from quantizers import iter_trainable_params, tensor2D_to_blocks
+from src.quantizers import iter_trainable_params, tensor2D_to_blocks
 
 with warnings.catch_warnings():
     warnings.filterwarnings(

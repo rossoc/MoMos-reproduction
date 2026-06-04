@@ -1,6 +1,6 @@
-num_workers: 0
+num_workers: 7
 pin_memory: false
-persistent_workers: false
+persistent_workers: true
 prefetch_factor: null
 transfer:
   non_blocking: false

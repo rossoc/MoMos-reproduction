@@ -1,0 +1,16 @@
+enabled: true
+method: momos
+
+s: null
+k: null
+capacity: null
+
+force_zero: true
+
+from_percentile: [0.5]
+to_percentile: [0.99]
+swapping_probability: null
+
+chunk_size: null
+chunk_progress: false
+chunk_progress_elements: null

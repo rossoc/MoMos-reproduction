@@ -34,13 +34,18 @@ def generate_unique_run_name(base_dir, slug):
 
 
 def setup_checkpoint_dir(log_dir, dataset_name, prefix, run_name):
-    """Create checkpoint directory structure and return paths.
+    """Plan the per-run directory layout and return paths.
 
-    Args:
-        log_dir: Base logging directory.
-        dataset_name: Name of the dataset (used in default directory name).
-        prefix: Optional prefix for the run directory. If None, defaults to ``"{dataset_name}_mlp"``.
-        run_name: Coolname slug for the run (e.g. ``"foggy-cat"``).
+    Layout:
+        <log_dir>/<base>/<unique_run_name>/init.ckpt        # initial weights
+        <log_dir>/<base>/<unique_run_name>/checkpoints/...  # Lightning ModelCheckpoint
+
+    Only ``run_base_dir`` is created here, so that ``generate_unique_run_name``
+    can scan it. The run dir and the ``checkpoints/`` subdir are created
+    lazily by their respective writers (``LitMLP`` saving ``init.ckpt`` and
+    Lightning's ``ModelCheckpoint``). Keeping them separate avoids the
+    "Checkpoint directory ... is not empty" warning that Lightning emits when
+    ``init.ckpt`` already lives in its ``dirpath``.
 
     Returns:
         Tuple of ``(checkpoint_dir, unique_run_name, init_ckpt_path)``.
@@ -49,9 +54,9 @@ def setup_checkpoint_dir(log_dir, dataset_name, prefix, run_name):
     run_base_dir = os.path.join(log_dir, base_dir)
     os.makedirs(run_base_dir, exist_ok=True)
     unique_run_name = generate_unique_run_name(run_base_dir, run_name)
-    checkpoint_dir = os.path.join(run_base_dir, unique_run_name)
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    init_ckpt_path = os.path.join(checkpoint_dir, "init.ckpt")
+    run_dir = os.path.join(run_base_dir, unique_run_name)
+    init_ckpt_path = os.path.join(run_dir, "init.ckpt")
+    checkpoint_dir = os.path.join(run_dir, "checkpoints")
     return checkpoint_dir, unique_run_name, init_ckpt_path
 
 

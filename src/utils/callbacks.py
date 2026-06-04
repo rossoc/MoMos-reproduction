@@ -6,6 +6,7 @@ from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
+from omegaconf import OmegaConf
 
 from quantizers import quantize_qat, k_from_capacity, quantize
 from utils.metrics import compute_metrics
@@ -100,7 +101,11 @@ class QuantizationCallback(L.Callback):
             rows = int(self.quant_cfg.get("rows") or 1)
             cols = int(self.quant_cfg.get("cols") or 1)
             metrics = compute_metrics(
-                model, self.metric_names, self.compression_binarized, rows=rows, cols=cols
+                model,
+                self.metric_names,
+                self.compression_binarized,
+                rows=rows,
+                cols=cols,
             )
             for name, value in metrics.items():
                 if value is not None:
@@ -111,6 +116,60 @@ class QuantizationCallback(L.Callback):
             print(f"Warning: Failed to compute metrics: {e}")
 
 
+def _best_checkpoint(checkpoint_dir: str) -> ModelCheckpoint:
+    return ModelCheckpoint(
+        dirpath=checkpoint_dir,
+        filename="best",
+        monitor="val/loss",
+        mode="min",
+        save_top_k=1,
+        save_last=False,
+    )
+
+
+def _periodic_checkpoint(checkpoint_dir: str) -> ModelCheckpoint:
+    return ModelCheckpoint(
+        dirpath=checkpoint_dir,
+        filename="epoch-{epoch:02d}",
+        every_n_epochs=20,
+        save_top_k=-1,
+    )
+
+
+def _early_stopping(patience: int | None) -> EarlyStopping | None:
+    if patience is None or patience <= 0:
+        return None
+    return EarlyStopping(
+        monitor="val/loss", mode="min", patience=patience, verbose=True
+    )
+
+
+def _build_quantization_callback(cfg, quant_cfg) -> QuantizationCallback:
+    """Convert a per-method `quantization` config into a QuantizationCallback.
+
+    The YAML file selected by Hydra's `quantization=<method>` group already
+    contains exactly the keys the method consumes, so we forward the dict
+    as-is (minus the config-only `enabled` flag).
+    """
+    full = OmegaConf.to_container(quant_cfg, resolve=True)
+    assert isinstance(full, dict)
+    full.pop("enabled", None)
+
+    method = full.get("method")
+    if method in ("momos2d", "static_momos2d"):
+        full["s"] = int(full["rows"]) * int(full["cols"])
+
+    if method in ("momos", "momos2d", "static_momos2d"):
+        if full.get("k") is None and full.get("capacity") is None:
+            raise ValueError(f"{method} requires either k or capacity in config")
+
+    return QuantizationCallback(
+        quant_cfg=full,
+        metric_names=cfg.get("metrics", []),
+        compression_binarized=cfg.get("all_compression_metrics_binarized", False),
+    )
+
+
 def build_callbacks(
     cfg,
     checkpoint_dir: str,
@@ -119,193 +178,25 @@ def build_callbacks(
 ) -> list[L.Callback]:
     """Build the complete list of callbacks for training.
 
-    This factory function creates all standard callbacks (checkpointing, early stopping,
-    LR monitoring) plus quantization callbacks if enabled in the config.
-
-    Args:
-        cfg: Full Hydra configuration dictionary. Expected structure:
-            - ``cfg.patience``: Early stopping patience (or None)
-            - ``cfg.quantization.enabled``: Whether quantization is active
-            - ``cfg.quantization.method``: ``"qat"`` or ``"momos"``
-            - ``cfg.quantization.*``: Method-specific parameters
-            - ``cfg.metrics``: List of metric names to track
-        checkpoint_dir: Directory path for saving model checkpoints.
-        unique_run_name: Unique identifier for this run (used in checkpoint naming).
-        has_logger: Whether a logger (e.g. W&B) will be used. Controls whether
-            ``LearningRateMonitor`` is included.
-
-    Returns:
-        List of Lightning callback instances ready for ``Trainer(callbacks=...)``.
+    Includes standard callbacks (checkpointing, early stopping, LR monitoring)
+    plus a quantization callback if `cfg.quantization.enabled` is true. The
+    per-method quantization schema lives in `src/configs/quantization/`.
     """
     callbacks: list[L.Callback] = []
 
-    # Learning rate monitor (requires a logger)
     if has_logger:
         callbacks.append(LearningRateMonitor(logging_interval="epoch"))
 
-    # Model checkpointing
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=checkpoint_dir,
-        filename="best",
-        monitor="val/loss",
-        mode="min",
-        save_top_k=1,
-        save_last=False,
-    )
-    callbacks.append(checkpoint_callback)
+    callbacks.append(_best_checkpoint(checkpoint_dir))
 
-    if cfg.get("periodic_checkpoint", None):
-        periodic_checkpoint = ModelCheckpoint(
-            dirpath=checkpoint_dir,
-            filename="epoch-{epoch:02d}",  # Includes epoch number in filename
-            every_n_epochs=20,
-            save_top_k=-1,  # Set to -1 to keep all periodic checkpoints
-            # Or set to 3 to keep only the last 3 periodic ones
-        )
-        callbacks.append(periodic_checkpoint)
+    if cfg.get("periodic_checkpoint"):
+        callbacks.append(_periodic_checkpoint(checkpoint_dir))
 
-    # Early stopping (optional)
-    patience = cfg.get("patience")
-    if patience is not None and patience > 0:
-        callbacks.append(
-            EarlyStopping(
-                monitor="val/loss",
-                mode="min",
-                patience=patience,
-                verbose=True,
-            )
-        )
+    if (es := _early_stopping(cfg.get("patience"))) is not None:
+        callbacks.append(es)
 
-    # Quantization callback (if enabled)
     quant_cfg = cfg.get("quantization", {})
     if quant_cfg.get("enabled", False):
-        method = quant_cfg.get("method")
-        if method is not None and method.lower() in (
-            "qat",
-            "momos",
-            "momos2d",
-            "static_momos2d",
-        ):
-            # Build full quantization config dict for the quantizer modules
-            full_quant_cfg = {
-                "method": method.lower(),
-                "q": int(quant_cfg.get("q", 32)),
-            }
-            if method.lower() == "qat":
-                full_quant_cfg["exclude_layers"] = quant_cfg.get("exclude_layers", [])
-            elif method.lower() == "momos":
-                full_quant_cfg["s"] = int(quant_cfg["s"])
-                # Resolve k from direct value or capacity
-                if quant_cfg.get("k") is not None:
-                    full_quant_cfg["k"] = int(quant_cfg["k"])
-                elif quant_cfg.get("capacity") is not None:
-                    # Will be resolved by callback using model at epoch end
-                    full_quant_cfg["capacity"] = float(quant_cfg["capacity"])
-                    full_quant_cfg["k"] = None  # placeholder, resolved in callback
-                else:
-                    raise ValueError("MoMos requires either k or capacity in config")
-                full_quant_cfg["force_zero"] = bool(quant_cfg.get("force_zero", True))
-                if "chunk_size" in quant_cfg:
-                    full_quant_cfg["chunk_size"] = quant_cfg["chunk_size"]
-                if "chunk_progress" in quant_cfg:
-                    full_quant_cfg["chunk_progress"] = bool(quant_cfg["chunk_progress"])
-                if "chunk_progress_elements" in quant_cfg:
-                    full_quant_cfg["chunk_progress_elements"] = quant_cfg[
-                        "chunk_progress_elements"
-                    ]
-                if (
-                    quant_cfg.get("from_percentile") is not None
-                    and quant_cfg.get("to_percentile") is not None
-                    and quant_cfg.get("swapping_probability") is not None
-                ):
-                    full_quant_cfg |= {
-                        "from_percentile": quant_cfg.get("from_percentile"),
-                        "to_percentile": quant_cfg.get("to_percentile"),
-                        "swapping_probability": quant_cfg.get("swapping_probability"),
-                    }
-            elif method.lower() == "momos2d":
-                full_quant_cfg["rows"] = int(quant_cfg["rows"])
-                full_quant_cfg["cols"] = int(quant_cfg["cols"])
-                full_quant_cfg["s"] = int(quant_cfg["rows"]) * int(quant_cfg["cols"])
-                # Resolve k from direct value or capacity
-                if quant_cfg.get("k") is not None:
-                    full_quant_cfg["k"] = int(quant_cfg["k"])
-                elif quant_cfg.get("capacity") is not None:
-                    # Will be resolved by callback using model at epoch end
-                    full_quant_cfg["capacity"] = float(quant_cfg["capacity"])
-                    full_quant_cfg["k"] = None  # placeholder, resolved in callback
-                else:
-                    raise ValueError("MoMos requires either k or capacity in config")
-                full_quant_cfg["force_zero"] = bool(quant_cfg.get("force_zero", True))
-                if "chunk_size" in quant_cfg:
-                    full_quant_cfg["chunk_size"] = quant_cfg["chunk_size"]
-                if "chunk_progress" in quant_cfg:
-                    full_quant_cfg["chunk_progress"] = bool(quant_cfg["chunk_progress"])
-                if "chunk_progress_elements" in quant_cfg:
-                    full_quant_cfg["chunk_progress_elements"] = quant_cfg[
-                        "chunk_progress_elements"
-                    ]
-                if (
-                    quant_cfg.get("from_percentile") is not None
-                    and quant_cfg.get("to_percentile") is not None
-                    and quant_cfg.get("swapping_probability") is not None
-                ):
-                    full_quant_cfg |= {
-                        "from_percentile": quant_cfg.get("from_percentile"),
-                        "to_percentile": quant_cfg.get("to_percentile"),
-                        "swapping_probability": quant_cfg.get("swapping_probability"),
-                    }
-
-            elif method.lower() == "static_momos2d":
-                full_quant_cfg["rows"] = int(quant_cfg["rows"])
-                full_quant_cfg["cols"] = int(quant_cfg["cols"])
-                full_quant_cfg["s"] = int(quant_cfg["rows"]) * int(quant_cfg["cols"])
-                if quant_cfg.get("k") is not None:
-                    full_quant_cfg["k"] = int(quant_cfg["k"])
-                elif quant_cfg.get("capacity") is not None:
-                    full_quant_cfg["capacity"] = float(quant_cfg["capacity"])
-                    full_quant_cfg["k"] = None
-                else:
-                    raise ValueError(
-                        "static_momos2d requires either k or capacity in config"
-                    )
-                full_quant_cfg["init_mode"] = str(
-                    quant_cfg.get("init_mode", "sr_rational")
-                )
-                if quant_cfg.get("exp_A") is not None:
-                    full_quant_cfg["exp_A"] = float(quant_cfg["exp_A"])
-                if quant_cfg.get("exp_B") is not None:
-                    full_quant_cfg["exp_B"] = float(quant_cfg["exp_B"])
-                if quant_cfg.get("exp_C") is not None:
-                    full_quant_cfg["exp_C"] = float(quant_cfg["exp_C"])
-                full_quant_cfg["force_zero"] = bool(quant_cfg.get("force_zero", True))
-                if "chunk_size" in quant_cfg:
-                    full_quant_cfg["chunk_size"] = quant_cfg["chunk_size"]
-                if "chunk_progress" in quant_cfg:
-                    full_quant_cfg["chunk_progress"] = bool(quant_cfg["chunk_progress"])
-                if "chunk_progress_elements" in quant_cfg:
-                    full_quant_cfg["chunk_progress_elements"] = quant_cfg[
-                        "chunk_progress_elements"
-                    ]
-                if (
-                    quant_cfg.get("from_percentile") is not None
-                    and quant_cfg.get("to_percentile") is not None
-                    and quant_cfg.get("swapping_probability") is not None
-                ):
-                    full_quant_cfg |= {
-                        "from_percentile": quant_cfg.get("from_percentile"),
-                        "to_percentile": quant_cfg.get("to_percentile"),
-                        "swapping_probability": quant_cfg.get("swapping_probability"),
-                    }
-
-            callbacks.append(
-                QuantizationCallback(
-                    quant_cfg=full_quant_cfg,
-                    metric_names=cfg.get("metrics", []),
-                    compression_binarized=cfg.get(
-                        "all_compression_metrics_binarized", False
-                    ),
-                )
-            )
+        callbacks.append(_build_quantization_callback(cfg, quant_cfg))
 
     return callbacks

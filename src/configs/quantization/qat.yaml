@@ -1,0 +1,4 @@
+enabled: true
+method: qat
+q: 32
+exclude_layers: []

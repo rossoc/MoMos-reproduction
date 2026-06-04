@@ -8,7 +8,7 @@ import torch.nn.utils.parametrize as parametrize
 
 import src.quantizers as quantizers
 
-from src.quantizers.momos import _nearest_motifs_chunked
+from src.quantizers.block_utils import _nearest_motifs_chunked
 
 
 class VectorModel(nn.Module):

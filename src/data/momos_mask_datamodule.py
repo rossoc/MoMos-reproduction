@@ -5,9 +5,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader, Sampler
 import lightning as L
 
-from view.weight_distribution import load_model, extract_blocks_2d
-from quantizers.momos import _nearest_motifs_chunked
-from quantizers.momos2d import pad_to_multiple
+from src.view.weight_distribution import load_model, extract_blocks_2d
+from src.quantizers.block_utils import _nearest_motifs_chunked
+from src.quantizers.momos2d import pad_to_multiple
 
 
 class MotifMaskDataset(Dataset):
@@ -139,7 +139,9 @@ class LayerBucketBatchSampler(Sampler[list[int]]):
         self.generator = generator
 
     def __iter__(self):
-        perm_kwargs = {"generator": self.generator} if self.generator is not None else {}
+        perm_kwargs = (
+            {"generator": self.generator} if self.generator is not None else {}
+        )
         buckets: list[list[int]] = []
         for L_idx in range(self.n_layers):
             idx = torch.arange(self.n_motifs, dtype=torch.long) * self.n_layers + L_idx
@@ -231,7 +233,9 @@ class MotifMaskDataModule(L.LightningDataModule):
             kwargs["collate_fn"] = _per_layer_collate
             return DataLoader(dataset, **kwargs)  # type: ignore
 
-        use_bucketed = self.motif_batch_size is not None and int(self.motif_batch_size) > 1
+        use_bucketed = (
+            self.motif_batch_size is not None and int(self.motif_batch_size) > 1
+        )
         if use_bucketed:
             sampler = LayerBucketBatchSampler(
                 n_motifs=dataset.n_motifs,

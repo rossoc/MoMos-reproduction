@@ -6,8 +6,8 @@ import lightning as L
 
 from .mamba import Mamba
 from .lit_module import LitMLP
-from quantizers.momos2d import blocks_to_tensor2D
-from quantizers.block_utils import iter_trainable_params
+from src.quantizers.momos2d import blocks_to_tensor2D
+from src.quantizers.block_utils import iter_trainable_params
 
 
 class LitMamba(L.LightningModule):

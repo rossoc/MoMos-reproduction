@@ -9,8 +9,8 @@ import os
 import pytest
 import torch
 
-from data.momos_mask_datamodule import MotifMaskDataModule
-from model.lit_mamba import LitMamba
+from src.data.momos_mask_datamodule import MotifMaskDataModule
+from src.model.lit_mamba import LitMamba
 
 
 CHECKPOINT = "artifacts/model-sh4p5gxq:v0/model.ckpt"

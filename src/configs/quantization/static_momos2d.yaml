@@ -1,0 +1,23 @@
+enabled: true
+method: static_momos2d
+
+rows: null
+cols: null
+k: null
+capacity: null
+
+force_zero: true
+
+# "exp_inverse", "exp_lookup", or "sr_rational"
+init_mode: sr_rational
+exp_A: null
+exp_B: null
+exp_C: null
+
+from_percentile: [0.5]
+to_percentile: [0.99]
+swapping_probability: null
+
+chunk_size: null
+chunk_progress: false
+chunk_progress_elements: null

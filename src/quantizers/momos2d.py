@@ -1,5 +1,9 @@
-from .block_utils import iter_trainable_params, build_swap_motif
-from .momos import _initialize_motifs, _assign_blocks
+from .block_utils import (
+    iter_trainable_params,
+    build_swap_motif,
+    _initialize_motifs,
+    _assign_blocks,
+)
 import torch.nn.functional as F
 import torch
 

@@ -3,8 +3,8 @@
 from torch.utils.data import DataLoader, Subset
 import lightning as L
 
-from data.util import build_transform, load_dataset, count_from_pct
-from utils.init import normalize_pct
+from .util import build_transform, load_dataset, count_from_pct
+from src.utils.init import normalize_pct
 
 import torch
 
@@ -48,7 +48,9 @@ class ImageDataModule(L.LightningDataModule):
         self.fold = int(fold) if fold is not None else None
         self.kfold_seed = kfold_seed
         if self.fold is not None and not (0 <= self.fold < self.n_folds):
-            raise ValueError(f"fold must be in [0, {self.n_folds - 1}], got {self.fold}")
+            raise ValueError(
+                f"fold must be in [0, {self.n_folds - 1}], got {self.fold}"
+            )
         self.runtime = runtime or {
             "num_workers": 0,
             "pin_memory": False,
@@ -97,7 +99,9 @@ class ImageDataModule(L.LightningDataModule):
             perm = torch.randperm(total_train, generator=kfold_rng)
             fold_size = total_train // self.n_folds
             val_start = self.fold * fold_size
-            val_end = total_train if self.fold == self.n_folds - 1 else val_start + fold_size
+            val_end = (
+                total_train if self.fold == self.n_folds - 1 else val_start + fold_size
+            )
             val_idx = perm[val_start:val_end].tolist()
             train_idx = perm[
                 torch.cat([torch.arange(val_start), torch.arange(val_end, total_train)])

@@ -231,3 +231,122 @@ if __name__ == "__main__":
     assert new_counts[3] < original_counts[3], "low-freq motif should be swapped out"
     assert new_counts[0] > original_counts[0], "high-freq motif should gain indices"
     print("Test passed.")
+
+
+def _nearest_motifs_chunked(
+    blocks,
+    motifs,
+    chunk_size=None,
+    show_progress=False,
+    progress_prefix="momos",
+    progress_every_elements=None,
+):
+    """Assign each block to nearest motif using chunked pairwise distances.
+
+    Args:
+        blocks: Block matrix with shape ``[num_blocks, block_size]``.
+        motifs: Motif matrix with shape ``[k_eff, block_size]``.
+        chunk_size: Optional memory budget in MB for chunked distance
+            computation. Default is ``4096`` MB (~4 GB).
+        show_progress: If True, print coarse chunk progress updates.
+        progress_prefix: Label prefix for progress lines.
+        progress_every_elements: Optional progress print interval measured in
+            processed scalar elements.
+
+    Returns:
+        Long tensor of nearest motif indices for each block.
+    """
+    n_blocks = int(blocks.size(0))
+    block_size = int(blocks.size(1)) if blocks.dim() > 1 else 1
+    n_motifs = int(motifs.size(0))
+    chunk_size = chunk_size or 256
+    chunk = _resolve_chunk_size_blocks(
+        n_blocks,
+        n_motifs,
+        chunk_size=chunk_size,
+        dtype=blocks.dtype,
+    )
+
+    nearest = torch.empty(n_blocks, dtype=torch.long, device=blocks.device)
+    motifs_t = motifs.t().contiguous()
+    motifs_norm2 = motifs.square().sum(dim=1).view(1, -1)
+    total_elements = n_blocks * block_size
+    total_chunks = (n_blocks + chunk - 1) // chunk
+    print_every = _resolve_progress_every_elements(
+        total_elements,
+        progress_every_elements=progress_every_elements,
+    )
+    next_emit = print_every
+    for start in range(0, n_blocks, chunk):
+        end = min(start + chunk, n_blocks)
+        chunk_blocks = blocks[start:end]
+        chunk_norm2 = chunk_blocks.square().sum(dim=1, keepdim=True)
+        # Exact Euclidean argmin via squared distances:
+        # ||x-c||^2 = ||x||^2 + ||c||^2 - 2 x c^T
+        nearest[start:end] = torch.addmm(
+            chunk_norm2 + motifs_norm2, chunk_blocks, motifs_t, beta=1, alpha=-2.0
+        ).argmin(dim=1)
+
+        if show_progress:
+            chunk_idx = (start // chunk) + 1
+            local_done = end * block_size
+            should_emit = local_done >= next_emit or end == n_blocks
+            if should_emit:
+                pct = 100.0 * float(local_done) / float(max(1, total_elements))
+                blocks_done = int(end)
+                blocks_total = int(n_blocks)
+                pairwise_done = int(blocks_done * n_motifs)
+                pairwise_total = int(blocks_total * n_motifs)
+                print(
+                    f"{progress_prefix}: chunk {chunk_idx}/{total_chunks} "
+                    f"blocks {blocks_done:,}/{blocks_total:,} "
+                    f"pairwise {pairwise_done:,}/{pairwise_total:,} ({pct:.1f}%)",
+                    flush=True,
+                )
+                while next_emit <= local_done:
+                    next_emit += print_every
+    return nearest
+
+def _initialize_motifs(all_blocks, k_eff, block_size, force_zero):
+    """Handles motif selection based on force_zero logic."""
+    total_blocks = all_blocks.size(0)
+    motifs = torch.zeros(
+        k_eff, block_size, device=all_blocks.device, dtype=all_blocks.dtype
+    )
+
+    if force_zero and k_eff > 1:
+        idx = torch.randperm(total_blocks, device=all_blocks.device)[: k_eff - 1]
+        motifs[1:] = all_blocks[idx]  # First row remains zero
+    elif not force_zero:
+        idx = torch.randperm(total_blocks, device=all_blocks.device)[:k_eff]
+        motifs = all_blocks[idx]
+
+    return motifs
+
+def _assign_blocks(
+    all_blocks, motifs, chunk_size, show_progress, prefix, progress_every, swapping_fn
+):
+    """Finds nearest motifs and applies optional swapping."""
+    total_blocks = all_blocks.size(0)
+
+    # Handle the edge case where only one motif exists (usually force_zero=True, k=1)
+    if motifs.size(0) == 1:
+        nearest = torch.zeros(total_blocks, dtype=torch.long, device=all_blocks.device)
+        return nearest, 0
+
+    nearest = _nearest_motifs_chunked(
+        all_blocks,
+        motifs,
+        chunk_size=chunk_size,
+        show_progress=show_progress,
+        progress_prefix=prefix,
+        progress_every_elements=progress_every,
+    )
+
+    swapped_count = 0
+    if swapping_fn is not None:
+        swapped = swapping_fn(nearest)
+        swapped_count = (nearest != swapped).sum().item()
+        nearest = swapped
+
+    return nearest, swapped_count

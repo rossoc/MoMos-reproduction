@@ -16,8 +16,7 @@ Default G-function parameters are fitted on a v20 CIFAR-10/MLP checkpoint.
 """
 
 import torch
-from .block_utils import build_swap_motif
-from .momos import _assign_blocks, _initialize_motifs
+from .block_utils import build_swap_motif, _assign_blocks, _initialize_motifs
 from .momos2d import blocks_to_tensor2D, _get_model_blocks2D
 
 # ---------------------------------------------------------------------------
