@@ -1,0 +1,33 @@
+enabled: true
+method: hierarchical_momos2d
+
+# Fraction of total epochs after which the secondary (higher) pass kicks in.
+# E.g. 0.5 means the second half of training applies primary + secondary.
+switch_fraction: 0.5
+
+primary:
+  rows: null
+  cols: null
+  k: null
+  capacity: null
+
+  force_zero: true
+
+  from_percentile: [0.5]
+  to_percentile: [0.99]
+  swapping_probability: null
+
+  chunk_size: null
+  chunk_progress: false
+  chunk_progress_elements: null
+
+# Secondary (higher) MoMos. `rows`/`cols` here count *primary motifs* per side
+# of a big block — so s' = rows * cols primary motifs per big block. `capacity`
+# is *relative to K_primary*: k_per_bucket = round(K_primary * capacity).
+# If `force_zero` is true, the zero motif is always present in every iota_i.
+secondary:
+  rows: null
+  cols: null
+  capacity: null
+
+  force_zero: true

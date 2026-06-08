@@ -27,6 +27,7 @@ from .momos import (
 )
 
 from .momos2d import quantize_momos2D, momos2D, tensor2D_to_blocks
+from .momos_hierarchy import quantize_hierarchical_momos2D
 from .static_momos import (
     quantize_static_momos2D,
     static_momos2D,
@@ -60,6 +61,8 @@ __all__ = [
     "momos2D",
     "quantize_momos2D",
     "tensor2D_to_blocks",
+    # Hierarchical (doubled) MoMos2D
+    "quantize_hierarchical_momos2D",
     # Static MoMos2D (G-function initialised)
     "static_momos2D",
     "quantize_static_momos2D",
@@ -74,6 +77,7 @@ METHODS = {
     "momos": quantize_momos,
     "momos2d": quantize_momos2D,
     "static_momos2d": quantize_static_momos2D,
+    "hierarchical_momos2d": quantize_hierarchical_momos2D,
 }
 
 

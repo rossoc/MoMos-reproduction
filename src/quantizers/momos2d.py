@@ -134,7 +134,9 @@ def momos2D(
         for param, n_blocks, n_params, shape in layer_specs:
             next_offset = offset + n_blocks
             q_blocks = quantized_blocks[offset:next_offset]
-            param.data.copy_(blocks_to_tensor2D(q_blocks, shape, rows, cols))
+            param.data.copy_(
+                blocks_to_tensor2D(q_blocks, shape, rows, cols).reshape(param.shape)
+            )
             offset = next_offset
 
     return {
@@ -142,6 +144,10 @@ def momos2D(
         "num_changed_weights": int(changed_weights),
         "motif_counts": motif_counts,
         "swapped_blocks": swapped_blocks,
+        # Internals reused by hierarchical_momos2d to avoid re-extraction.
+        "_motifs": motifs,
+        "_nearest": nearest,
+        "_layer_specs": layer_specs,
     }
 
 
