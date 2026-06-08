@@ -75,8 +75,6 @@ def _secondary_pass(
     K = int(Z.shape[0])
     device = Z.device
 
-    k_per_bucket = max(1, min(K, int(round(K * capacity))))
-
     with torch.no_grad():
         zero_idx = None
         if force_zero:
@@ -88,6 +86,7 @@ def _secondary_pass(
         counts = torch.zeros(s_prime, K, dtype=torch.long, device=device)
         grids = []
         offset = 0
+        n_big_total = 0
         pos_idx_cache = torch.arange(s_prime, device=device)
         for param, n_blocks, _, shape in layer_specs:
             batch, R_p, C_p = _per_param_grid(shape, rows, cols)
@@ -112,6 +111,11 @@ def _secondary_pass(
             counts += c.view(s_prime, K + 1)[:, :K]
 
             grids.append((param, shape, batch, R_p, C_p, R_big, C_big, grid))
+            n_big_total += batch * R_big * C_big
+
+        # k_per_bucket relative to big-block count: capacity=1 ⇒ k_per_bucket=n_big
+        # (no mosaic compression, equivalent to standard MoMos); capped at K.
+        k_per_bucket = max(1, min(K, int(round(n_big_total * capacity))))
 
         # iota_i per position.
         iotas = []

@@ -107,9 +107,10 @@ class QuantizationCallback(L.Callback):
         if primary.get("k") is None and primary.get("capacity") is not None:
             primary["k"] = k_from_capacity(model, s, primary["capacity"])
         k = int(primary["k"])
-        k_per_bucket = max(1, min(k, int(round(k * c))))
 
         n = sum(p.numel() for p in iter_trainable_params(model))
+        n_big = math.ceil(n / (s * s_prime))
+        k_per_bucket = max(1, min(k, int(round(n_big * c))))
 
         est = _hierarchical_bit_estimate(n, k, s, s_prime, k_per_bucket, q)
         baseline = n * q
