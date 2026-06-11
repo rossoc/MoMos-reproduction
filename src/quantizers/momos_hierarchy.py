@@ -128,8 +128,14 @@ def _secondary_pass(
                 c[zero_idx] = -1
                 remaining -= 1
             if remaining > 0:
-                top = torch.topk(c, min(remaining, K)).indices.tolist()
-                chosen.extend(top)
+                weights = c.clamp(min=0).float()
+                nonzero = int((weights > 0).sum().item())
+                n = min(remaining, nonzero)
+                if n > 0:
+                    sampled = torch.multinomial(
+                        weights, n, replacement=False
+                    ).tolist()
+                    chosen.extend(sampled)
             iotas.append(
                 torch.tensor(sorted(set(chosen)), dtype=torch.long, device=device)
             )
