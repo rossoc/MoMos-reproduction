@@ -69,10 +69,6 @@ class Mamba(nn.Module):
         self.output_head = nn.Linear(hidden_size, out_channels)
         self.relu = nn.ReLU(inplace=True)
 
-        import transformers.models.mamba2.modeling_mamba2 as _m2
-
-        _m2.is_fast_path_available = False
-
     def forward(self, motif, layer, n_rows, n_cols, row=0, col=0):
         device = self.row_embedding.weight.device
         squeeze_batch = motif.dim() == 0
