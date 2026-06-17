@@ -42,7 +42,7 @@ for s_col in "${COLS[@]}"; do
                     seed=$seed \
                     fold=$fold \
                     wandb.enabled=true \
-                    wandb.project=momos2d-hierarchical2 \
+                    wandb.project=momos2d-hierarchical3 \
                     wandb.name="r${s_row}_c${s_col}_cap${s_cap}" \
                     "metrics=[sparsity,l2,gzip,bz2,lzma,bdm]" \
                     quantization=hierarchical_momos2d \
