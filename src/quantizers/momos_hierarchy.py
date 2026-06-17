@@ -115,7 +115,8 @@ def _secondary_pass(
 
         # k_per_bucket relative to big-block count: capacity=1 ⇒ k_per_bucket=n_big
         # (no mosaic compression, equivalent to standard MoMos); capped at K.
-        k_per_bucket = max(1, min(K, int(round(n_big_total * capacity))))
+        k_per_bucket = max(1, min(round(K * capacity), int(n_big_total)))
+        k_per_bucket = torch.ceil(torch.log2(k_per_bucket))
 
         # iota_i per position.
         iotas = []
