@@ -110,7 +110,9 @@ class QuantizationCallback(L.Callback):
 
         n = sum(p.numel() for p in iter_trainable_params(model))
         n_big = math.ceil(n / (s * s_prime))
-        k_per_bucket = max(1, min(k, int(round(n_big * c))))
+        # Bucket size is relative to K_primary (capacity * K), matching the
+        # quantizer in momos_hierarchy.py; capped at the big-block count.
+        k_per_bucket = max(1, min(int(round(k * c)), n_big))
 
         est = _hierarchical_bit_estimate(n, k, s, s_prime, k_per_bucket, q)
         baseline = n * q

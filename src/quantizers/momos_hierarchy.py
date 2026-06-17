@@ -17,7 +17,6 @@ If ``secondary.force_zero`` is true, the zero motif is always included in every
 
 import torch
 import torch.nn.functional as F
-import math
 
 from .momos2d import quantize_momos2D, blocks_to_tensor2D
 
@@ -114,10 +113,12 @@ def _secondary_pass(
             grids.append((param, shape, batch, R_p, C_p, R_big, C_big, grid))
             n_big_total += batch * R_big * C_big
 
-        # k_per_bucket relative to big-block count: capacity=1 ⇒ k_per_bucket=n_big
-        # (no mosaic compression, equivalent to standard MoMos); capped at K.
+        # k_per_bucket is the bucket size: number of allowed primary motifs kept
+        # per position. capacity is relative to K_primary, so capacity=1 ⇒
+        # k_per_bucket=K (no per-position restriction, equivalent to standard
+        # MoMos); capped at the big-block count. The bits/index = log2(k_per_bucket)
+        # is a derived quantity handled in the bit accounting, not here.
         k_per_bucket = max(1, min(round(K * capacity), int(n_big_total)))
-        k_per_bucket = math.ceil(math.log2(k_per_bucket))
 
         # iota_i per position.
         iotas = []
