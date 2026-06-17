@@ -17,7 +17,7 @@ primary:
   to_percentile: [0.99]
   swapping_probability: null
 
-  chunk_size: null
+  chunk_size: 512
   chunk_progress: false
   chunk_progress_elements: null
 

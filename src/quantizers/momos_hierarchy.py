@@ -132,17 +132,14 @@ def _secondary_pass(
                 nonzero = int((weights > 0).sum().item())
                 n = min(remaining, nonzero)
                 if n > 0:
-                    sampled = torch.multinomial(
-                        weights, n, replacement=False
-                    ).tolist()
+                    sampled = torch.multinomial(weights, n, replacement=False).tolist()
                     chosen.extend(sampled)
             iotas.append(
                 torch.tensor(sorted(set(chosen)), dtype=torch.long, device=device)
             )
 
         # Nearest allowed motif per position, precomputed as (s_prime, K+1).
-        Z2 = Z.square().sum(dim=1)
-        D = Z2.unsqueeze(0) + Z2.unsqueeze(1) - 2.0 * (Z @ Z.t())
+        D = torch.cdist(Z, Z, p=2) ** 2
         mapping_stack = torch.empty(s_prime, K + 1, dtype=torch.long, device=device)
         for i, iota in enumerate(iotas):
             mapping_stack[i, :K] = iota[D[:, iota].argmin(dim=1)]
