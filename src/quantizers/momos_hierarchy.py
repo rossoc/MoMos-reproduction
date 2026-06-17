@@ -17,6 +17,7 @@ If ``secondary.force_zero`` is true, the zero motif is always included in every
 
 import torch
 import torch.nn.functional as F
+import math
 
 from .momos2d import quantize_momos2D, blocks_to_tensor2D
 
@@ -116,7 +117,7 @@ def _secondary_pass(
         # k_per_bucket relative to big-block count: capacity=1 ⇒ k_per_bucket=n_big
         # (no mosaic compression, equivalent to standard MoMos); capped at K.
         k_per_bucket = max(1, min(round(K * capacity), int(n_big_total)))
-        k_per_bucket = torch.ceil(torch.log2(k_per_bucket))
+        k_per_bucket = math.ceil(math.log2(k_per_bucket))
 
         # iota_i per position.
         iotas = []
