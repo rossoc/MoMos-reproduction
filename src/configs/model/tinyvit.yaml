@@ -1,0 +1,5 @@
+name: tinyvit
+model_id: tiny_vit_5m_224   # timm registry id; also tiny_vit_11m_224 / tiny_vit_21m_224
+img_size: 224               # tiny_vit_5m_224 expects 224; datamodule resizes inputs to this
+learning_rate: 3e-4
+weight_decay: 1e-2
