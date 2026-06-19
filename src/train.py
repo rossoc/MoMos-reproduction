@@ -55,6 +55,7 @@ def main(cfg: DictConfig):
         img_size=img_size,
         num_classes=cfg.dataset.num_classes,
     )
+    compile_model = bool(cfg.model.get("compile", False))
     model = LitClassifier(
         backbone=backbone,
         num_classes=cfg.dataset.num_classes,
@@ -62,6 +63,7 @@ def main(cfg: DictConfig):
         weight_decay=cfg.model.weight_decay,
         epochs=cfg.epochs,
         save_init_path=init_ckpt_path,
+        compile_model=compile_model,
     )
 
     # Setup callbacks via factory
@@ -108,7 +110,9 @@ def main(cfg: DictConfig):
         log_every_n_steps=50,
         enable_progress_bar=True,
         enable_model_summary=True,
-        deterministic=True,
+        # torch.compile (Inductor) can conflict with deterministic algorithms;
+        # keep the deterministic baseline unless the model opts into compiling.
+        deterministic=not compile_model,
     )
 
     # Train

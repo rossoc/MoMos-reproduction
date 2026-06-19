@@ -31,6 +31,11 @@ class LitClassifier(L.LightningModule):
         weight_decay: Weight decay (L2 regularization) factor.
         epochs: Number of epochs (for cosine LR scheduler).
         save_init_path: Optional path to save initial model weights.
+        compile_model: If True, compile the backbone in place via
+            ``nn.Module.compile`` (``torch.compile``). Done in place so
+            ``self.model``'s identity and ``state_dict`` keys are unchanged,
+            keeping the quantization callback and checkpointing unaffected.
+            Most effective on CUDA; little/no benefit on MPS/CPU.
     """
 
     def __init__(
@@ -41,6 +46,7 @@ class LitClassifier(L.LightningModule):
         weight_decay: float = 1e-2,
         epochs: int = 200,
         save_init_path: str | None = None,
+        compile_model: bool = False,
     ):
         super().__init__()
         # Ignore the backbone module itself; Lightning still collects the init
@@ -50,10 +56,14 @@ class LitClassifier(L.LightningModule):
         self.model = backbone
         self.criterion = nn.CrossEntropyLoss()
 
-        # Save initial model weights if path is provided
+        # Save initial weights before compiling so the snapshot is uncompiled.
         if save_init_path:
             os.makedirs(os.path.dirname(save_init_path), exist_ok=True)
             torch.save(self.state_dict(), save_init_path)
+
+        # Compile in place: keeps self.model identity and state_dict keys intact.
+        if compile_model:
+            self.model.compile()
 
     def forward(self, x):
         """Run a forward pass through the backbone."""
