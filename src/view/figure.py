@@ -77,6 +77,7 @@ class Figure:
         limits=None,
         ax=None,
         axis=None,
+        grid=True,
     ):
         ax = ax or self._ax()
         ax.set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
@@ -102,7 +103,7 @@ class Figure:
         else:
             ax.set_title(exp_name)
 
-        ax.grid(True)
+        ax.grid(grid)
         if axis:
             ax.set_xlim(left=axis[0])
             ax.set_ylim(bottom=axis[0])
@@ -115,8 +116,8 @@ class Figure:
 
     def plot(
         self,
-        data: dict[str, tuple[list[float], list[float]] | pd.DataFrame],
-        exp_name: str,
+        data: dict[str, tuple | pd.DataFrame],
+        exp_name: str | None,
         logx=False,
         logy=False,
         x_label="Epochs",
@@ -130,6 +131,7 @@ class Figure:
         legend=True,
         limits=None,
         axis=(0, 0),
+        grid=True,
     ):
         self._next_plot()
 
@@ -146,7 +148,15 @@ class Figure:
             )
 
         self._default_settings(
-            x_label, y_label, exp_name, style, logx, logy, limits=limits, axis=axis
+            x_label,
+            y_label,
+            exp_name,
+            style,
+            logx,
+            logy,
+            limits=limits,
+            axis=axis,
+            grid=grid,
         )
         if legend:
             self._ax().legend()
@@ -164,6 +174,7 @@ class Figure:
         style: Literal["sci", "scientific", "plain"] = "plain",
         markersize=5,
         legend=True,
+        grid=True,
     ):
         """
         data is of the kind:
@@ -190,7 +201,7 @@ class Figure:
                 color=_COLORS[i % len(_COLORS)],
             )
 
-        self._default_settings(x_label, y_label, exp_name, style, logx, logy)
+        self._default_settings(x_label, y_label, exp_name, style, logx, logy, grid=grid)
         if legend:
             ax.legend()
 
@@ -206,6 +217,7 @@ class Figure:
         logx=1,
         logy=1,
         style: Literal["sci", "scientific", "plain"] = "plain",
+        grid=True,
     ):
         """
         Create a 3D plot from list of tuples (x, y, z), such that the z is
@@ -245,7 +257,7 @@ class Figure:
         ax.ticklabel_format(
             axis="both", useMathText=True, useOffset=True, style=style, scilimits=(0, 0)
         )
-        ax.grid(True)
+        ax.grid(grid)
 
         if logx > 1:
             ax.set_xscale("log", base=logx)
@@ -268,6 +280,7 @@ class Figure:
         skip_n=0,
         pop_n=0,
         colors=_COLORS,
+        grid=True,
     ):
         self._next_plot()
 
@@ -287,7 +300,7 @@ class Figure:
             color=colors[0],
         )
 
-        ax1.grid(True)
+        ax1.grid(grid)
 
         if logx:
             ax1.set_xscale("log")
@@ -338,6 +351,7 @@ class Figure:
         pop_n=0,
         colors=_COLORS,
         alpha=0.12,
+        grid=True,
     ):
         self._next_plot()
 
@@ -367,7 +381,7 @@ class Figure:
             color=colors[0],
         )
 
-        ax1.grid(True)
+        ax1.grid(grid)
 
         if logx:
             ax1.set_xscale("log")
@@ -448,3 +462,42 @@ class Figure:
     def show(self):
         self.fig.tight_layout()
         self.fig.show()
+
+    def axhline(self, data, color, linestyle):
+        for label, y in data.items():
+            self._ax().axhline(
+                y=y,
+                linestyle=linestyle,
+                color=color,
+            )
+            self._ax().text(
+                x=1.01,
+                y=y,
+                s=label,
+                color=color,
+                va="center",
+                ha="left",
+                transform=self._ax().get_yaxis_transform(),
+                fontproperties=_FONT,
+                fontsize=self.fontsize,
+            )
+
+    def axvline(self, data, color, linestyle):
+        for label, x in data.items():
+            self._ax().axvline(
+                x=x,
+                linestyle=linestyle,
+                color=color,
+            )
+            self._ax().text(
+                x=x,
+                y=1.02,
+                s=label,
+                rotation=270,
+                color=color,
+                va="bottom",
+                ha="center",
+                transform=self._ax().get_xaxis_transform(),
+                fontproperties=_FONT,
+                fontsize=self.fontsize,
+            )

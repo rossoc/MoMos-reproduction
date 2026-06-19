@@ -95,7 +95,9 @@ class Report:
         self.figures = []
         self.output_dir = Path(output_dir)
 
-    def new_figure(self, title=None, figSize=(10, 7), ncols=1, nrows=1, fontsize=13):
+    def new_figure(
+        self, title=None, figSize=(10, 7), ncols=1, nrows=1, fontsize=13
+    ) -> Figure:
         fig = Figure(title, figSize, ncols, nrows, fontsize)
         self.figures.append(fig)
         return fig
@@ -110,14 +112,28 @@ class Report:
             fig = self.new_figure(t + " vs Validation Loss", nrows=2, ncols=2)
 
             for sub_t, data in run_data.items():
-                d = (
-                    (range(len(data[m][0])), data[m][0], data[m][1]),
-                    (
-                        range(len(data["val/loss"][0])),
-                        data["val/loss"][0],
-                        data["val/loss"][1],
-                    ),
-                )
+                if m not in data or "val/loss" not in data:
+                    continue
+                if len(data[m][0]) == 0 or len(data["val/loss"][0]) == 0:
+                    continue
+                if len(data[m]) == 3:
+                    d = (
+                        (data[m][0], data[m][1], data[m][2]),
+                        (
+                            data["val/loss"][0],
+                            data["val/loss"][1],
+                            data["val/loss"][2],
+                        ),
+                    )
+                else:
+                    d = (
+                        (range(len(data[m][0])), data[m][0], data[m][1]),
+                        (
+                            range(len(data["val/loss"][0])),
+                            data["val/loss"][0],
+                            data["val/loss"][1],
+                        ),
+                    )
                 fig.plot_twinx_with_var(d, sub_t, y1_label=t)
                 if show:
                     fig.show()
@@ -134,9 +150,14 @@ class Report:
         for m, t in tr_overview.items():
             data = {}
             for k, v in run_data.items():
-                data[k] = (range(len(v[m][0])), v[m][0], v[m][1])
-            print(data)
-            fig.plot_with_var(data, "", y_label=t)
+                if m not in v or len(v[m][0]) == 0:
+                    continue
+                if len(v[m]) == 3:
+                    data[k] = (v[m][0], v[m][1], v[m][2])
+                else:
+                    data[k] = (range(len(v[m][0])), v[m][0], v[m][1])
+            if data:
+                fig.plot_with_var(data, "", y_label=t)
 
         if show:
             fig.show()

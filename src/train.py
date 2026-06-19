@@ -7,7 +7,7 @@ from lightning.pytorch.loggers import WandbLogger
 from coolname import generate_slug
 
 from data import ImageDataModule
-from model.lit_module import LitMLP
+from model import LitClassifier, build_backbone
 from utils.init import resolve_runtime, setup_checkpoint_dir
 from utils.callbacks import build_callbacks
 
@@ -21,12 +21,17 @@ def main(cfg: DictConfig):
 
     _, runtime_cfg = resolve_runtime(cfg.accelerator)
 
+    # Effective input size: a model may require a fixed resolution (e.g. timm
+    # TinyViT expects 224), overriding the dataset's native size. The datamodule
+    # resizes to this size, so the backbone receives the geometry it expects.
+    img_size = cfg.model.get("img_size", None) or cfg.dataset.img_size
+
     # Create DataModule
     datamodule: ImageDataModule = ImageDataModule(
         dataset_name=cfg.dataset.name,
         data_dir=cfg.data_dir,
         batch_size=cfg.batch_size,
-        img_size=cfg.dataset.img_size,
+        img_size=img_size,
         val_pct=cfg.dataset.val_pct,
         test_pct=cfg.dataset.test_pct,
         n_folds=cfg.dataset.n_folds,
@@ -34,9 +39,6 @@ def main(cfg: DictConfig):
         kfold_seed=cfg.dataset.kfold_seed,
         runtime=runtime_cfg,
     )
-
-    # Calculate input dimension
-    input_dim = cfg.dataset.in_channels * cfg.dataset.img_size * cfg.dataset.img_size
 
     # Setup checkpoint directory
     checkpoint_dir, unique_run_name, init_ckpt_path = setup_checkpoint_dir(
@@ -46,9 +48,15 @@ def main(cfg: DictConfig):
         run_name=run_name,
     )
 
-    # Create LightningModule
-    model = LitMLP(
-        input_dim=input_dim,
+    # Build the backbone (mlp / timm TinyViT / ...) and wrap it
+    backbone = build_backbone(
+        cfg.model,
+        in_channels=cfg.dataset.in_channels,
+        img_size=img_size,
+        num_classes=cfg.dataset.num_classes,
+    )
+    model = LitClassifier(
+        backbone=backbone,
         num_classes=cfg.dataset.num_classes,
         learning_rate=cfg.model.learning_rate,
         weight_decay=cfg.model.weight_decay,

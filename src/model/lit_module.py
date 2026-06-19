@@ -1,4 +1,11 @@
-"""LightningModule wrapping MLP for classification training."""
+"""LightningModules for image classification training.
+
+`LitClassifier` is a backbone-agnostic classifier: it wraps any ``nn.Module``
+(MLP, timm TinyViT, ...) as ``self.model`` so that downstream tooling — notably
+the ``QuantizationCallback`` which operates on ``pl_module.model`` — works for any
+architecture. `LitMLP` is a thin subclass that builds an MLP backbone and keeps
+its original ``input_dim`` API plus the motif save/load helpers.
+"""
 
 import os
 
@@ -13,12 +20,13 @@ from quantizers.momos2d import tensor2D_to_blocks, blocks_to_tensor2D
 _MOTIF_FORMAT = "momos2d-motifs-v1"
 
 
-class LitMLP(L.LightningModule):
-    """LightningModule for MLP image classification.
+class LitClassifier(L.LightningModule):
+    """Backbone-agnostic LightningModule for image classification.
 
     Args:
-        input_dim: Flattened input dimension (channels * height * width).
-        num_classes: Number of output classes.
+        backbone: The classifier network. Exposed as ``self.model`` so callbacks
+            (e.g. quantization) can operate on it regardless of architecture.
+        num_classes: Number of output classes (kept for metadata/hparams).
         learning_rate: Initial learning rate for AdamW optimizer.
         weight_decay: Weight decay (L2 regularization) factor.
         epochs: Number of epochs (for cosine LR scheduler).
@@ -27,7 +35,7 @@ class LitMLP(L.LightningModule):
 
     def __init__(
         self,
-        input_dim: int,
+        backbone: nn.Module,
         num_classes: int = 10,
         learning_rate: float = 3e-4,
         weight_decay: float = 1e-2,
@@ -35,9 +43,11 @@ class LitMLP(L.LightningModule):
         save_init_path: str | None = None,
     ):
         super().__init__()
-        self.save_hyperparameters()
+        # Ignore the backbone module itself; Lightning still collects the init
+        # args of any subclass frame (e.g. LitMLP's ``input_dim``) up the MRO.
+        self.save_hyperparameters(ignore=["backbone"])
 
-        self.model = MLP(input_dim, num_classes)
+        self.model = backbone
         self.criterion = nn.CrossEntropyLoss()
 
         # Save initial model weights if path is provided
@@ -46,7 +56,7 @@ class LitMLP(L.LightningModule):
             torch.save(self.state_dict(), save_init_path)
 
     def forward(self, x):
-        """Run a forward pass through the MLP."""
+        """Run a forward pass through the backbone."""
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
@@ -90,6 +100,62 @@ class LitMLP(L.LightningModule):
         self.log("test/acc", acc, on_epoch=True)
 
         return loss
+
+    def configure_optimizers(self):
+        """Configure AdamW optimizer with cosine LR scheduler."""
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.hparams.learning_rate,  # type: ignore
+            weight_decay=self.hparams.weight_decay,  # type: ignore
+        )
+
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=self.hparams.epochs,  # type: ignore
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
+
+
+class LitMLP(LitClassifier):
+    """LightningModule for MLP image classification.
+
+    Thin subclass of :class:`LitClassifier` that builds an :class:`MLP` backbone
+    from a flattened ``input_dim`` and adds motif save/load helpers.
+
+    Args:
+        input_dim: Flattened input dimension (channels * height * width).
+        num_classes: Number of output classes.
+        learning_rate: Initial learning rate for AdamW optimizer.
+        weight_decay: Weight decay (L2 regularization) factor.
+        epochs: Number of epochs (for cosine LR scheduler).
+        save_init_path: Optional path to save initial model weights.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        num_classes: int = 10,
+        learning_rate: float = 3e-4,
+        weight_decay: float = 1e-2,
+        epochs: int = 200,
+        save_init_path: str | None = None,
+    ):
+        super().__init__(
+            backbone=MLP(input_dim, num_classes),
+            num_classes=num_classes,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            epochs=epochs,
+            save_init_path=save_init_path,
+        )
 
     def save_as_motifs(self, path: str, rows: int, cols: int) -> None:
         """Save the model in compressed motif form.
@@ -196,25 +262,3 @@ class LitMLP(L.LightningModule):
             state[name] = tensor
         module.model.load_state_dict(state)
         return module
-
-    def configure_optimizers(self):
-        """Configure AdamW optimizer with cosine LR scheduler."""
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.hparams.learning_rate,  # type: ignore
-            weight_decay=self.hparams.weight_decay,  # type: ignore
-        )
-
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=self.hparams.epochs,  # type: ignore
-        )
-
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "epoch",
-                "frequency": 1,
-            },
-        }
