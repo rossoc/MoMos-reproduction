@@ -1,36 +1,23 @@
-echo "========================================="
-echo " MoMos Sweep: s ∈ {2,4,8,16,32,64,128}"
-echo "              capacity ∈ {0.01,0.05,0.1,0.2,0.3}"
-echo "              35 total runs"
-echo "========================================="
+#!/bin/bash
+set -e
 
-for S in 2 4 8 16 32 64 128; do
-  for CAP in 0.01 0.05 0.1 0.2 0.3; do
+SEEDS=(42 777 50 78 291)
+
+for i in "${!SEEDS[@]}"; do
+    seed="${SEEDS[$i]}"
+    fold=$i  # The fold is now directly linked to the seed index (0, 1, 2, 3, 4)
+
     uv run python src/train.py \
-      epochs=200 accelerator=cuda dataset.name=cifar10 \
+      epochs=200 \
+      accelerator=cuda \
+      dataset.name=cifar10 \
+      wandb.project=momos2d-hierarchical3 \
       wandb.enabled=true \
+      wandb.name="baseline-momos" \
       metrics=[sparsity,l2,gzip,bz2,lzma,bdm] \
-      quantization.enabled=true quantization.method=momos \
-      quantization.s=$S quantization.capacity=$CAP \
-      quantization.force_zero=true quantization.q=32
+      quantization=momos \
+      quantization.s=2 quantization.capacity=0.001 \
+      quantization.force_zero=true
   done
-done
 
-echo ""
-echo "========================================="
-echo " QAT Sweep: q ∈ {4,8,16}"
-echo "              3 total runs"
-echo "========================================="
-
-
-for Q in 4 8 16; do
-  uv run python src/train.py \
-    epochs=200 accelerator=cuda dataset.name=cifar10 \
-    wandb.enabled=true \
-    metrics=[sparsity,l2,gzip,bz2,lzma,bdm] \
-    quantization.enabled=true quantization.method=qat \
-    quantization.q=$Q quantization.exclude_layers=[]
-done
-
-echo ""
 echo "All sweeps completed."
