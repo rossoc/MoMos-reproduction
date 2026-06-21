@@ -142,13 +142,22 @@ def resolve_runtime(mode):
     return accelerator, runtime_cfg
 
 
-def configure_cuda_fast_path():
-    """Enable common CUDA fast-path settings when CUDA is available."""
+def configure_cuda_fast_path(enable_benchmark=False):
+    """Enable common CUDA fast-path settings when CUDA is available.
+
+    Args:
+        enable_benchmark: If True, also turn on ``cudnn.benchmark`` (conv
+            autotuner). It is nondeterministic and conflicts with deterministic
+            mode, so callers should only enable it when determinism is already
+            dropped (e.g. when ``torch.compile`` is in use). TF32 and the matmul
+            precision setting are pure wins and are always applied.
+    """
     if not torch.cuda.is_available():
         return
-    torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
+    if enable_benchmark:
+        torch.backends.cudnn.benchmark = True
     try:
         torch.set_float32_matmul_precision("high")
     except Exception:

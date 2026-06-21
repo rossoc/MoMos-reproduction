@@ -19,6 +19,9 @@ batch_size: 128
 # Trainer
 accelerator: auto
 devices: 1
+# null = auto: bf16-mixed on CUDA, 32-true otherwise. On older GPUs (V100/T4)
+# set precision=16-mixed. Explicit values: 32-true, 16-mixed, bf16-mixed.
+precision: null
 
 # Logging
 log_dir: ./outputs

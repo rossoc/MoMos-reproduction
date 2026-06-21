@@ -8,7 +8,7 @@ from coolname import generate_slug
 
 from data import ImageDataModule
 from model import LitClassifier, build_backbone
-from utils.init import resolve_runtime, setup_checkpoint_dir
+from utils.init import resolve_runtime, setup_checkpoint_dir, configure_cuda_fast_path
 from utils.callbacks import build_callbacks
 
 
@@ -19,7 +19,22 @@ def main(cfg: DictConfig):
     run_name = generate_slug()
     L.seed_everything(cfg.seed)
 
-    _, runtime_cfg = resolve_runtime(cfg.accelerator)
+    accelerator, runtime_cfg = resolve_runtime(cfg.accelerator)
+
+    # Whether the model opts into torch.compile; needed up-front because it
+    # gates both the CUDA conv autotuner and the deterministic baseline.
+    compile_model = bool(cfg.model.get("compile", False))
+
+    # Enable CUDA fast-path (TF32 + high matmul precision). cudnn.benchmark is
+    # nondeterministic, so only enable it when compiling (deterministic is off
+    # in that case). No-op when CUDA is unavailable.
+    configure_cuda_fast_path(enable_benchmark=compile_model)
+
+    # Mixed precision: auto-pick by device when unset. bf16-mixed needs Ampere+;
+    # override with precision=16-mixed on older GPUs (V100/T4).
+    precision = cfg.get("precision", None)
+    if precision is None:
+        precision = "bf16-mixed" if accelerator == "cuda" else "32-true"
 
     # Effective input size: a model may require a fixed resolution (e.g. timm
     # TinyViT expects 224), overriding the dataset's native size. The datamodule
@@ -55,7 +70,6 @@ def main(cfg: DictConfig):
         img_size=img_size,
         num_classes=cfg.dataset.num_classes,
     )
-    compile_model = bool(cfg.model.get("compile", False))
     model = LitClassifier(
         backbone=backbone,
         num_classes=cfg.dataset.num_classes,
@@ -105,6 +119,7 @@ def main(cfg: DictConfig):
         max_epochs=cfg.epochs,
         accelerator=cfg.accelerator,
         devices=cfg.devices,
+        precision=precision,
         callbacks=callbacks,
         logger=logger,
         log_every_n_steps=50,
