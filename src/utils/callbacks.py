@@ -8,11 +8,27 @@ from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
+from lightning.pytorch.trainer.states import TrainerFn
 from omegaconf import OmegaConf
 
 from quantizers import quantize_qat, k_from_capacity, quantize
 from quantizers.block_utils import iter_trainable_params
 from utils.metrics import compute_metrics
+
+
+# Keys returned by ``quantize`` that are not scalar metrics to log under quant/.
+_QUANT_LOG_SKIP = {
+    "motif_counts",
+    "method",
+    "iota",
+    "bucket_sizes",
+    "K_primary",
+    "s_prime",
+    "k_per_bucket",
+    "_motifs",
+    "_nearest",
+    "_layer_specs",
+}
 
 
 def _hierarchical_bit_estimate(n, k, s, s_prime, k_per_bucket, q):
@@ -67,6 +83,9 @@ class QuantizationCallback(L.Callback):
         self.metric_names = metric_names or []
         self.compression_binarized = compression_binarized
         self.method = str(quant_cfg.get("method", "")).lower()
+        # Stats from the most recent MoMos projection, logged in
+        # on_validation_epoch_end (projection runs in on_validation_epoch_start).
+        self._last_quant_stats: dict | None = None
 
     def on_fit_start(self, trainer: L.Trainer, pl_module: L.LightningModule):
         """Set up QAT parametrizations before training begins."""
@@ -140,14 +159,27 @@ class QuantizationCallback(L.Callback):
             except Exception:
                 pass
 
-    def on_train_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule):
-        """Apply MoMos projection at the end of each training epoch."""
+    def on_validation_epoch_start(self, trainer: L.Trainer, pl_module: L.LightningModule):
+        """Apply MoMos projection before validation runs.
+
+        Lightning nests the validation loop inside the training epoch, so this
+        hook fires after the epoch's training batches but before the validation
+        batches (and before ``on_train_epoch_end``). Projecting here means
+        validation, the post-validation metrics, and the ``ModelCheckpoint``
+        saved during validation all reflect the quantized model.
+        """
         if self.method not in [
             "momos",
             "momos2d",
             "static_momos2d",
             "hierarchical_momos2d",
         ]:
+            return
+
+        # Skip the pre-training sanity-check validation and any standalone
+        # trainer.validate()/test() pass at the end of main: project only during
+        # the fit-time validation that follows a real training epoch.
+        if trainer.sanity_checking or trainer.state.fn != TrainerFn.FITTING:
             return
 
         model = pl_module.model
@@ -177,29 +209,28 @@ class QuantizationCallback(L.Callback):
 
         stats = quantize(model, self.quant_cfg)
 
-        report = ""
-        skip = {
-            "motif_counts",
-            "method",
-            "iota",
-            "bucket_sizes",
-            "K_primary",
-            "s_prime",
-            "k_per_bucket",
-            "_motifs",
-            "_nearest",
-            "_layer_specs",
-        }
-        for k, v in stats.items():
-            if k in skip:
-                continue
-            pl_module.log("quant/" + k, v, on_epoch=True, prog_bar=False)
-            report += f"{k}={v:.4f}"
+        # Stash for logging in on_validation_epoch_end; logging is cleaner from
+        # the epoch-end hook than from epoch-start.
+        self._last_quant_stats = stats
 
+        report = ""
+        for k, v in stats.items():
+            if k in _QUANT_LOG_SKIP:
+                continue
+            report += f"{k}={v:.4f}"
         print("MoMos applied:", report)
 
     def on_validation_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule):
-        """Compute and log quantization metrics after validation."""
+        """Log MoMos projection stats and compute quantization metrics."""
+        # Log the stats from this epoch's projection (set in
+        # on_validation_epoch_start) so they land on the same step as val metrics.
+        if self._last_quant_stats is not None:
+            for k, v in self._last_quant_stats.items():
+                if k in _QUANT_LOG_SKIP:
+                    continue
+                pl_module.log("quant/" + k, v, on_epoch=True, prog_bar=False)
+            self._last_quant_stats = None
+
         if not self.metric_names:
             return
 
