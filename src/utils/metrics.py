@@ -82,6 +82,7 @@ def compute_metrics(model, names, compression_binarized=False, rows=1, cols=1):
         "sparsity": ("sparsity", analyzer.sparsity),
         "l2": ("weight_l2", analyzer.l2_norm),
         "bdm": ("bdm_complexity", analyzer.bdm_complexity),
+        "qbdm": ("qbdm_complexity", analyzer.qbdm),
         "gzip": ("gzip_compression_rate", analyzer.gzip_compress),
         "bz2": ("bz2_compression_rate", analyzer.bz2_compress),
         "lzma": ("lzma_compression_rate", analyzer.lzma_compress),
@@ -115,6 +116,9 @@ class WeightAnalyzer:
         blocks = flatten_weights(model, rows=rows, cols=cols)
         self.weights = blocks.ravel()
         self.weights2d = blocks
+        # Kept for metrics (e.g. qbdm) that need per-layer weight matrices and
+        # parametrized (quantized) weights rather than the flattened block view.
+        self._model = model
 
         self._payload_cache = {}
         self._compression_binarized = compression_binarized
@@ -168,6 +172,27 @@ class WeightAnalyzer:
         bits = np.ascontiguousarray((self.weights > 0).astype(np.uint8))
         try:
             return float(self._bdm_engine.bdm(bits))
+        except Exception as e:
+            print(e)
+            return None
+
+    def qbdm(self, bit_depth=8):
+        """Compute quantized bit-plane BDM complexity over weight matrices.
+
+        Unlike :meth:`bdm_complexity` (sign bits only), this uniformly quantizes
+        each trainable weight matrix to ``bit_depth`` levels and sums BDM over
+        all binary bit-planes. Heavier than ``bdm`` (multiprocessing over many
+        planes); intended for periodic (e.g. per-epoch) evaluation.
+
+        Returns:
+            Float complexity value, or None on failure.
+        """
+        if self.weights.size == 0:
+            return 0.0
+        try:
+            from src.utils.qbdm import qbdm_complexity
+
+            return qbdm_complexity(self._model, bit_depth=bit_depth)
         except Exception as e:
             print(e)
             return None

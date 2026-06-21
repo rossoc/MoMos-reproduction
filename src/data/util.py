@@ -30,12 +30,13 @@ def build_transform(dataset_name, img_size, is_train):
                 [
                     transforms.RandomHorizontalFlip(),
                     transforms.RandomCrop(32, padding=4),
+                    transforms.RandAugment(num_ops=2, magnitude=9),
                 ]
             )
+        # Resize last so crop/flip/RandAugment operate on the small (cheap)
+        # native image instead of the upscaled one (~49x less per-op work at 224).
         if img_size != 32:
             ops.append(transforms.Resize((img_size, img_size)))
-        if is_train:
-            ops.append(transforms.RandAugment(num_ops=2, magnitude=9))
         ops.extend(
             [
                 transforms.ToTensor(),
