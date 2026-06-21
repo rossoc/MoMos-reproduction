@@ -17,7 +17,7 @@ def main(cfg: DictConfig):
     """Run training with PyTorch Lightning and Hydra config management."""
     # Set seed for reproducibility
     run_name = generate_slug()
-    L.seed_everything(cfg.seed)
+    L.seed_everything(cfg.seed, workers=True)
 
     accelerator, runtime_cfg = resolve_runtime(cfg.accelerator)
 
