@@ -12,14 +12,47 @@ from utils.init import resolve_runtime, setup_checkpoint_dir, configure_cuda_fas
 from utils.callbacks import build_callbacks
 
 
-@hydra.main(config_path="configs", config_name="config", version_base="1.3")
-def main(cfg: DictConfig):
-    """Run training with PyTorch Lightning and Hydra config management."""
+def build_datamodule(cfg: DictConfig) -> ImageDataModule:
+    """Construct the ImageDataModule for a given config.
+
+    Only depends on `cfg.dataset.*`, `cfg.fold`, `cfg.batch_size`, `cfg.model`
+    (img_size), and `cfg.accelerator` (runtime) — not `cfg.quantization`,
+    `cfg.seed`, or `cfg.prefix` — so callers can build one instance per
+    distinct fold and reuse it across runs that share those fields.
+    """
+    _, runtime_cfg = resolve_runtime(cfg.accelerator)
+    img_size = cfg.model.get("img_size", None) or cfg.dataset.img_size
+    return ImageDataModule(
+        dataset_name=cfg.dataset.name,
+        data_dir=cfg.data_dir,
+        batch_size=cfg.batch_size,
+        img_size=img_size,
+        val_pct=cfg.dataset.val_pct,
+        test_pct=cfg.dataset.test_pct,
+        n_folds=cfg.dataset.n_folds,
+        fold=cfg.get("fold", None),
+        kfold_seed=cfg.dataset.kfold_seed,
+        runtime=runtime_cfg,
+    )
+
+
+def run_training(cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule | None = None) -> dict:
+    """Run training with PyTorch Lightning and Hydra config management.
+
+    Args:
+        cfg: DictConfig hydra configuration.
+        optuna_trial: Optional Optuna trial for pruning callbacks.
+        datamodule: Optional pre-built ImageDataModule to reuse (e.g. across
+            trials that share the same fold). Built from `cfg` when omitted.
+
+    Returns:
+        Dict with metrics (val_acc, val_loss, test_acc, test_loss, best_model_path).
+    """
     # Set seed for reproducibility
     run_name = generate_slug()
     L.seed_everything(cfg.seed, workers=True)
 
-    accelerator, runtime_cfg = resolve_runtime(cfg.accelerator)
+    accelerator, _ = resolve_runtime(cfg.accelerator)
 
     # Whether the model opts into torch.compile; needed up-front because it
     # gates both the CUDA conv autotuner and the deterministic baseline.
@@ -41,19 +74,8 @@ def main(cfg: DictConfig):
     # resizes to this size, so the backbone receives the geometry it expects.
     img_size = cfg.model.get("img_size", None) or cfg.dataset.img_size
 
-    # Create DataModule
-    datamodule: ImageDataModule = ImageDataModule(
-        dataset_name=cfg.dataset.name,
-        data_dir=cfg.data_dir,
-        batch_size=cfg.batch_size,
-        img_size=img_size,
-        val_pct=cfg.dataset.val_pct,
-        test_pct=cfg.dataset.test_pct,
-        n_folds=cfg.dataset.n_folds,
-        fold=cfg.get("fold", None),
-        kfold_seed=cfg.dataset.kfold_seed,
-        runtime=runtime_cfg,
-    )
+    if datamodule is None:
+        datamodule = build_datamodule(cfg)
 
     # Setup checkpoint directory
     checkpoint_dir, unique_run_name, init_ckpt_path = setup_checkpoint_dir(
@@ -89,6 +111,11 @@ def main(cfg: DictConfig):
         has_logger=has_logger,
     )
 
+    if optuna_trial is not None:
+        from utils.optuna_callback import OptunaTrainEpochPruning
+
+        callbacks.append(OptunaTrainEpochPruning(optuna_trial, monitor="val/acc"))
+
     # Extract checkpoint callback for later reference
     checkpoint_callback = next(
         (cb for cb in callbacks if isinstance(cb, L.pytorch.callbacks.ModelCheckpoint)),
@@ -104,9 +131,11 @@ def main(cfg: DictConfig):
             project=wandb_cfg.get("project", "momos-reproduction"),
             entity=wandb_cfg.get("entity", None),
             name=wandb_run_name,
+            group=wandb_cfg.get("group", None),
             tags=wandb_cfg.get("tags", []),
             log_model=wandb_cfg.get("log_model", False),
             save_dir=cfg.log_dir,
+            reinit=True,
         )
         # Log full Hydra config to W&B
         logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))  # type: ignore
@@ -117,7 +146,7 @@ def main(cfg: DictConfig):
     # Create Trainer
     trainer = L.Trainer(
         max_epochs=cfg.epochs,
-        accelerator=cfg.accelerator,
+        accelerator=accelerator,
         devices=cfg.devices,
         precision=precision,
         callbacks=callbacks,
@@ -130,23 +159,62 @@ def main(cfg: DictConfig):
         deterministic=not compile_model,
     )
 
-    # Train
-    trainer.fit(model, datamodule=datamodule)
+    try:
+        # Train
+        trainer.fit(model, datamodule=datamodule)
 
-    # Report best-checkpoint metrics
-    if checkpoint_callback.best_model_path:
-        print(f"\nLoading best checkpoint: {checkpoint_callback.best_model_path}")
-        print(f"Best validation loss: {checkpoint_callback.best_model_score:.4f}")
-        val_results = trainer.validate(
-            model, datamodule=datamodule, ckpt_path=checkpoint_callback.best_model_path
-        )
-        if val_results:
-            print(f"Best validation accuracy: {val_results[0]['val/acc']:.4f}")
+        best_val_acc = 0.0
+        best_val_loss = float("inf")
 
-    # Final test evaluation
-    print("\nEvaluating on test set...")
-    trainer.test(model, datamodule=datamodule)
+        # Report best-checkpoint metrics
+        if checkpoint_callback and checkpoint_callback.best_model_path:
+            print(f"\nLoading best checkpoint: {checkpoint_callback.best_model_path}")
+            best_val_loss = float(checkpoint_callback.best_model_score or float("inf"))
+            print(f"Best validation loss: {best_val_loss:.4f}")
+            val_results = trainer.validate(
+                model, datamodule=datamodule, ckpt_path=checkpoint_callback.best_model_path
+            )
+            if val_results:
+                best_val_acc = float(val_results[0].get("val/acc", 0.0))
+                print(f"Best validation accuracy: {best_val_acc:.4f}")
+        else:
+            best_val_acc = float(trainer.callback_metrics.get("val/acc", 0.0))
+            best_val_loss = float(trainer.callback_metrics.get("val/loss", float("inf")))
+
+        # Final test evaluation
+        test_results = None
+        if cfg.get("evaluate_test", True):
+            print("\nEvaluating on test set...")
+            test_results = trainer.test(model, datamodule=datamodule)
+
+        test_acc = float(test_results[0].get("test/acc", 0.0)) if test_results else None
+        test_loss = float(test_results[0].get("test/loss", 0.0)) if test_results else None
+
+        return {
+            "val_acc": best_val_acc,
+            "val_loss": best_val_loss,
+            "test_acc": test_acc,
+            "test_loss": test_loss,
+            "best_model_path": checkpoint_callback.best_model_path if checkpoint_callback else None,
+            "model": model,
+            "datamodule": datamodule,
+        }
+    finally:
+        if logger:
+            try:
+                import wandb
+                if wandb.run is not None:
+                    wandb.finish()
+            except Exception:
+                pass
+
+
+@hydra.main(config_path="configs", config_name="config", version_base="1.3")
+def main(cfg: DictConfig):
+    """Run training with PyTorch Lightning and Hydra config management."""
+    run_training(cfg)
 
 
 if __name__ == "__main__":
     main()
+

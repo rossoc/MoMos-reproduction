@@ -6,6 +6,7 @@ import ast
 import numpy as np
 from src.view import extract_columns, merge_dfs, Report
 from tqdm import tqdm
+from collections import defaultdict
 # %%
 
 api = wandb.Api()
@@ -217,23 +218,31 @@ for run in tqdm(best_runs):
 # %%
 best_runs_data
 # %%
-metrics = {}
 best_runs_summary = {}
 for r in grouped_runs.iterrows():
+    metrics_by_epoch = defaultdict(lambda: defaultdict(list))
     for run in best_runs_data:
         if run["name"] in r[1]["run_name"]:
             for metric in MOMOS2D_METRICS:
-                if metric not in metrics:
-                    metrics[metric] = []
-                metrics[metric] += [np.array(run["metrics"][metric].tolist())[:-1]]
+                if metric in run["metrics"].columns:
+                    clean_df = run["metrics"][["epoch", metric]].dropna()
+                    for epoch, val in zip(clean_df["epoch"], clean_df[metric]):
+                        metrics_by_epoch[metric][round(epoch, 4)].append(val)
 
     result = {}
-    for k, v in metrics.items():
-        max_len = max(len(run) for run in v)
-        v = [np.append(run, [np.nan] * (max_len - len(run))) for run in v]
-        mean = np.nanmean(v, axis=0)
-        std = np.nanstd(v, axis=0)
-        result[k] = (mean, std)
+    for metric in MOMOS2D_METRICS:
+        if metric in metrics_by_epoch and metrics_by_epoch[metric]:
+            epoch_dict = metrics_by_epoch[metric]
+            sorted_epochs = sorted(epoch_dict.keys())
+            means = []
+            stds = []
+            for epoch in sorted_epochs:
+                vals = epoch_dict[epoch]
+                means.append(np.mean(vals))
+                stds.append(np.std(vals) if len(vals) > 1 else 0.0)
+            result[metric] = (np.array(sorted_epochs), np.array(means), np.array(stds))
+        else:
+            result[metric] = (np.array([]), np.array([]), np.array([]))
 
     best_runs_summary[
         f"Switch {r[1]['from_percentile']}th with {r[1]['to_percentile']}th w.p. {r[1]['p_swap']}"

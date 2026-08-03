@@ -240,15 +240,20 @@ def static_momos2D(
         counts = torch.bincount(nearest, minlength=k_eff).to("cpu", dtype=torch.long)
         motif_counts[:k_eff] = counts
 
-        diff = all_blocks - quantized_blocks
-        distortion = diff.square().sum().item()
-        changed_weights = (all_blocks != quantized_blocks).sum().item()
-
+        distortion = 0.0
+        changed_weights = 0
         offset = 0
         for param, n_blocks, n_params, shape in layer_specs:
             next_offset = offset + n_blocks
-            q_blocks = quantized_blocks[offset:next_offset]
-            param.data.copy_(blocks_to_tensor2D(q_blocks, shape, rows, cols))
+            orig_tensor = blocks_to_tensor2D(
+                all_blocks[offset:next_offset], shape, rows, cols
+            ).reshape(param.shape)
+            quant_tensor = blocks_to_tensor2D(
+                quantized_blocks[offset:next_offset], shape, rows, cols
+            ).reshape(param.shape)
+            distortion += (orig_tensor - quant_tensor).square().sum().item()
+            changed_weights += (orig_tensor != quant_tensor).sum().item()
+            param.data.copy_(quant_tensor)
             offset = next_offset
 
     return {

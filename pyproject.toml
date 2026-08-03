@@ -17,6 +17,7 @@ dependencies = [
     "lightning>=2.6.1",
     "mamba-ssm>=2.3.2.post1 ; sys_platform == 'linux'",
     "matplotlib>=3.10.8",
+    "numpy",
     "optuna>=4.0.0",
     "pandas>=3.0.2",
     "pybdm>=0.1.0",

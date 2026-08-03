@@ -1480,11 +1480,13 @@ dependencies = [
     { name = "lightning" },
     { name = "mamba-ssm", marker = "sys_platform == 'linux'" },
     { name = "matplotlib" },
+    { name = "numpy" },
     { name = "optuna" },
     { name = "pandas" },
     { name = "pybdm" },
     { name = "pysr" },
     { name = "scikit-learn" },
+    { name = "timm" },
     { name = "torch" },
     { name = "torchvision" },
     { name = "transformers" },
@@ -1506,11 +1508,13 @@ requires-dist = [
     { name = "lightning", specifier = ">=2.6.1" },
     { name = "mamba-ssm", marker = "sys_platform == 'linux'", specifier = ">=2.3.2.post1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "numpy" },
     { name = "optuna", specifier = ">=4.0.0" },
     { name = "pandas", specifier = ">=3.0.2" },
     { name = "pybdm", specifier = ">=0.1.0" },
     { name = "pysr", specifier = ">=1.5.10" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
+    { name = "timm", specifier = ">=1.0.27" },
     { name = "torch", specifier = ">=2.11.0" },
     { name = "torchvision", specifier = ">=0.26.0" },
     { name = "transformers", specifier = ">=5.9.0" },
@@ -2967,6 +2971,22 @@ sdist = { url = "https://files.pythonhosted.org/packages/e6/27/6e363f48f87838907
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5d/0b/96ba853aa9e4795020d183e0ca832e9e37d82d4f7f48896241323d1b5ece/tilelang-0.1.8-cp38-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5a4018e581f55c852d98a42d3b4acf2dbcfb8b7d8b9156ba7c6b0ab61600a10c", size = 43477401, upload-time = "2026-02-16T14:03:02.879Z" },
     { url = "https://files.pythonhosted.org/packages/e6/db/d130c8db9140bb21a2ef81a455614a4aeec3388088bf9af5df01ad0ba45d/tilelang-0.1.8-cp38-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:bcc2e28202cde516bdd59e1c25b7f6a139d1c52207d92576f4e711c6217e16ba", size = 40422585, upload-time = "2026-02-16T14:03:12.092Z" },
+]
+
+[[package]]
+name = "timm"
+version = "1.0.27"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "pyyaml" },
+    { name = "safetensors" },
+    { name = "torch" },
+    { name = "torchvision" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/08/54/ece85b0eef3700c90db8271a43669b05a0ebbe2edb1962329c34374a297e/timm-1.0.27.tar.gz", hash = "sha256:315dfe63186ca9fb7ff941268941231fd5be259f2b4bb4afa28560ae1015cb9a", size = 2439861, upload-time = "2026-05-08T19:38:36.844Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1f/2e/26bab7686ff4aed48f8f5f6c23e2aa37b7a37ddd9effe3aa61e908fd518f/timm-1.0.27-py3-none-any.whl", hash = "sha256:5ff07c9ddf53cbada88eab1c93ff175c64cab683b5a2fddf863bcee985926f89", size = 2589280, upload-time = "2026-05-08T19:38:35.034Z" },
 ]
 
 [[package]]

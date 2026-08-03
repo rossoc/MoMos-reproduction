@@ -9,7 +9,7 @@ import numpy as np
 from collections import defaultdict
 from tqdm import tqdm
 
-project = "momos2d-hierarchical3"
+project = "fold-momos-tinyvit"
 api = wandb.Api()
 # %%
 
@@ -67,16 +67,29 @@ for r in momos2d_runs:
         summary = r["summary"]
         config = r["config"]
 
-    if (
-        config["quantization"].get("switch_fraction", None)
-        and config["quantization"]["switch_fraction"] != 0
-    ):
+    if config.get("quantization", None) and r["name"] == "baseline":
+        momos2d_data.append(
+            {
+                "name": "Baseline",
+                "run_name": r["name"],
+                "val_acc": summary["val/acc"],
+                "val_loss": summary["val/loss"],
+                "train_acc": summary["train/acc"],
+                "train_loss": summary["train/loss"],
+                "test_acc": summary["test/acc"],
+                "rows": 1,
+                "cols": 1,
+                "capacity": 1,
+                "ras": 1,
+            }
+        )
         continue
 
-    if r["name"] == "baseline-momos":
-        s = config["quantization"]["s"]
+    if r["name"] == "momos-baseline":
+        rows = config["quantization"]["rows"]
+        cols = config["quantization"]["cols"]
         cap = config["quantization"]["capacity"]
-        n = 986634
+        n = 5074974
         momos2d_data.append(
             {
                 "name": "MoMos baseline",
@@ -87,9 +100,9 @@ for r in momos2d_runs:
                 "train_loss": summary["train/loss"],
                 "test_acc": summary["test/acc"],
                 "rows": 1,
-                "cols": s,
+                "cols": 1,
                 "capacity": 1,
-                "ras": n * 32 / momos_complexity(n, cap, s),
+                "ras": n * 32 / momos_complexity(n, cap, rows * cols),
             }
         )
         continue
@@ -189,9 +202,9 @@ grouped_swapping = (
 
 best_params = pd.DataFrame(
     {
-        "rows": [1, 128, 64, 8],
-        "cols": [2, 2, 2, 8],
-        "capacity": [1, 1 / 4, 1 / 16, 1 / 4],
+        "rows": [1, 4, 4, 4],
+        "cols": [1, 32, 32, 32],
+        "capacity": [1, 1 / 2, 1 / 8, 1 / 16],
     }
 )
 
@@ -208,6 +221,7 @@ detail_runs = [
 ]
 # %%
 MOMOS2D_METRICS = [
+    "metrics/qbdm_complexity",
     "metrics/bdm_complexity",
     "metrics/gzip_compression_rate",
     "metrics/bz2_compression_rate",
@@ -279,7 +293,12 @@ for r in grouped_runs.to_dict("records"):
         else:
             result[metric] = (np.array([]), np.array([]), np.array([]))
 
-    runs_summary[f"rows: {r['rows']} cols: {r['cols']} cap: {r['capacity']}"] = result
+    if r["rows"] == 1 and r["cols"] == 1:
+        runs_summary["MoMos baseline"] = result
+    else:
+        runs_summary[f"rows: {r['rows']} cols: {r['cols']} cap: {r['capacity']}"] = (
+            result
+        )
 # %%
 tr_overview = {
     "val/acc": "Validation Accuracy",
@@ -290,6 +309,7 @@ tr_overview = {
 report.training_overview(runs_summary, tr_overview, show=True)
 # %%
 metrics_overview = {
+    "metrics/qbdm_complexity": "QBDM Complexity",
     "metrics/bdm_complexity": "BDM Complexity",
     "metrics/gzip_compression_rate": "Gzip Compression Rate",
     "metrics/bz2_compression_rate": "BZ2 Compression Rate",
@@ -300,6 +320,6 @@ metrics_overview = {
     "quant/num_changed_weights": "Number of Changed Weights",
 }
 
-report.metrics_vs_accuracy(runs_summary, metrics_overview, True)
+report.metrics_vs_accuracy(runs_summary, metrics_overview, style="sci", show=True)
 # %%
-report.save("momos_hierarchical_overview2.pdf")
+report.save("vfold_momos_vit.pdf")

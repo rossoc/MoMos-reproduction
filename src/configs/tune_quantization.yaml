@@ -1,0 +1,85 @@
+defaults:
+  - dataset: cifar10
+  - model: mlp
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+epochs: 20
+seed: 42
+fold: null
+data_dir: ./data
+batch_size: 128
+accelerator: auto
+devices: 1
+precision: null
+
+log_dir: ./outputs
+prefix: tune_quantization
+
+evaluate_test: true
+
+# Default quantization placeholder
+quantization:
+  enabled: true
+  method: none
+
+# Weights & Biases configuration
+wandb:
+  enabled: true
+  project: momos-quantization-tune
+  entity: null
+  name: null
+  group: ${optuna.study_name}
+  tags: [optuna, quantization-search]
+  log_model: false
+
+# Optuna configuration
+optuna:
+  study_name: quantization_pareto_search
+  storage_dir: ./outputs/optuna
+  n_trials: 30
+  eval_folds_search: [0]  # Fold(s) to evaluate during trial search
+  pareto_kfold_eval: true # If true, re-evaluate Pareto-best configs on all K folds
+  pareto_seeds: [42, 43, 44] # Random seeds for Pareto-best verification
+  
+  sampler:
+    seed: 42
+
+  # Quantization methods to include in the Optuna search
+  methods:
+    - momos2d
+    - qat
+    - hierarchical_momos2d
+
+  search_space:
+    momos2d:
+      rows: [2, 4, 8, 16]
+      cols: [2, 4, 8, 16]
+      capacity:
+        low: 0.001
+        high: 0.5
+        log: true
+      force_zero: [true]
+
+    qat:
+      q: [2, 4, 8, 16]
+
+    hierarchical_momos2d:
+      switch_fraction: 0.0
+      primary:
+        rows: [2, 4, 8]
+        cols: [2, 4, 8]
+        capacity:
+          low: 0.01
+          high: 0.5
+          log: true
+        force_zero: [true]
+      secondary:
+        rows: [2, 4, 8]
+        cols: [2, 4, 8]
+        capacity:
+          low: 0.05
+          high: 0.8
+          log: true
+        force_zero: [true]

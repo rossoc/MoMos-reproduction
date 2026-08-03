@@ -24,6 +24,10 @@ class OptunaTrainEpochPruning(L.Callback):
         self.monitor = monitor
 
     def on_train_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule):
+        # Optuna trial reporting and pruning are only supported for single-objective studies
+        study = self.trial.study
+        if len(study.directions) > 1 or getattr(study, "_is_multi_objective", lambda: False)():
+            return
         metric = trainer.callback_metrics.get(self.monitor)
         if metric is None:
             return

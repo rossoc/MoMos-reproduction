@@ -129,6 +129,7 @@ def resolve_device(mode):
 def resolve_runtime(mode):
     accelerator = resolve_device(mode)
 
+    runtime_cfg = None
     if accelerator in ("cuda", "mps", "cpu"):
         runtime_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),

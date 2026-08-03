@@ -1,27 +1,11 @@
-"""Hierarchical MoMos2D quantization.
+"""Hierarchical MoMos2D quantization."""
 
-Phase 1 (epoch progress < ``switch_fraction``): standard ``momos2D`` pass.
-
-Phase 2: after the primary pass runs, group its per-block assignments into
-``s' = sec.rows * sec.cols`` "big blocks". For each of the ``s'`` positions
-inside a big block, keep only the top ``k_per_bucket`` most frequent primary
-motifs (iota_i). Any block whose motif is no longer allowed at its position is
-reassigned to the nearest *allowed* primary motif and the weight tensor is
-updated.
-
-``k_per_bucket = round(K_primary * secondary.capacity)``.
-
-If ``secondary.force_zero`` is true, the zero motif is always included in every
-``iota_i``.
-"""
+import math
 
 import torch
 import torch.nn.functional as F
 
 from .momos2d import quantize_momos2D, blocks_to_tensor2D
-
-
-_INTERNAL_KEYS = ("_motifs", "_nearest", "_layer_specs")
 
 
 def quantize_hierarchical_momos2D(model, quant_cfg):
@@ -33,11 +17,7 @@ def quantize_hierarchical_momos2D(model, quant_cfg):
     M = stats.pop("_nearest", None)
     layer_specs = stats.pop("_layer_specs", None)
 
-    if not quant_cfg.get("apply_secondary", False):
-        return stats
-
-    if Z is None or M is None or layer_specs is None:
-        # Defensive — should never happen since we just ran primary.
+    if not quant_cfg.get("apply_secondary", False) or Z is None or M is None or layer_specs is None:
         return stats
 
     secondary_cfg = dict(quant_cfg["secondary"])
@@ -56,13 +36,10 @@ def quantize_hierarchical_momos2D(model, quant_cfg):
 
 def _per_param_grid(shape, rows, cols):
     if len(shape) < 2:
-        h, w = 1, int(shape[0])
-        batch = 1
+        h, w, batch = 1, int(shape[0]), 1
     else:
         h, w = int(shape[-2]), int(shape[-1])
-        batch = 1
-        for d in shape[:-2]:
-            batch *= int(d)
+        batch = math.prod(int(d) for d in shape[:-2])
     R_p = (h + rows - 1) // rows
     C_p = (w + cols - 1) // cols
     return batch, R_p, C_p
@@ -76,11 +53,8 @@ def _secondary_pass(
     device = Z.device
 
     with torch.no_grad():
-        zero_idx = None
-        if force_zero:
-            zero_mask = Z.abs().sum(dim=1) == 0
-            if zero_mask.any():
-                zero_idx = int(zero_mask.nonzero(as_tuple=False)[0].item())
+        zero_rows = (Z.abs().sum(dim=1) == 0).nonzero(as_tuple=True)[0]
+        zero_idx = int(zero_rows[0].item()) if force_zero and len(zero_rows) else None
 
         # Per-position counts of primary motifs across all big blocks.
         counts = torch.zeros(s_prime, K, dtype=torch.long, device=device)
@@ -93,10 +67,7 @@ def _secondary_pass(
             local = M[offset : offset + n_blocks].view(batch, R_p, C_p)
             offset += n_blocks
 
-            pad_r = (-R_p) % sec_rows
-            pad_c = (-C_p) % sec_cols
-            if pad_r or pad_c:
-                local = F.pad(local, (0, pad_c, 0, pad_r), value=K)
+            local = F.pad(local, (0, (-C_p) % sec_cols, 0, (-R_p) % sec_rows), value=K)
             R_big = local.shape[1] // sec_rows
             C_big = local.shape[2] // sec_cols
             grid = (
@@ -132,14 +103,11 @@ def _secondary_pass(
                 remaining -= 1
             if remaining > 0:
                 weights = c.clamp(min=0).float()
-                nonzero = int((weights > 0).sum().item())
-                n = min(remaining, nonzero)
+                n = min(remaining, int((weights > 0).sum().item()))
                 if n > 0:
                     sampled = torch.multinomial(weights, n, replacement=False).tolist()
                     chosen.extend(sampled)
-            iotas.append(
-                torch.tensor(sorted(set(chosen)), dtype=torch.long, device=device)
-            )
+            iotas.append(torch.tensor(sorted(chosen), dtype=torch.long, device=device))
 
         # Nearest allowed motif per position, precomputed as (s_prime, K+1).
         D = torch.cdist(Z, Z, p=2) ** 2
@@ -153,9 +121,7 @@ def _secondary_pass(
         changed = torch.zeros((), dtype=torch.long, device=device)
         for param, shape, batch, R_p, C_p, R_big, C_big, grid in grids:
             flat_old = grid.view(-1, s_prime)  # (N_big, s_prime)
-            new_flat = torch.gather(
-                mapping_stack, 1, flat_old.t()
-            ).t()  # (N_big, s_prime)
+            new_flat = torch.gather(mapping_stack, 1, flat_old.t()).t()
 
             new_grid = new_flat.view(batch, R_big, C_big, sec_rows, sec_cols)
             local_new = (
@@ -169,8 +135,7 @@ def _secondary_pass(
                 param.shape
             )
 
-            diff = new_tensor - param.data
-            distortion += diff.square().sum()
+            distortion += (new_tensor - param.data).square().sum()
             changed += (new_tensor != param.data).sum()
             param.data.copy_(new_tensor)
 

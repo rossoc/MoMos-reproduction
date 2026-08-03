@@ -107,7 +107,7 @@ class Report:
             for fig in self.figures:
                 fig.save(pdf=pdf)
 
-    def metrics_vs_accuracy(self, run_data, metrics, show=False):
+    def metrics_vs_accuracy(self, run_data, metrics, style="plain", show=False):
         for m, t in metrics.items():
             fig = self.new_figure(t + " vs Validation Loss", nrows=2, ncols=2)
 
@@ -134,7 +134,7 @@ class Report:
                             data["val/loss"][1],
                         ),
                     )
-                fig.plot_twinx_with_var(d, sub_t, y1_label=t)
+                fig.plot_twinx_with_var(d, sub_t, y1_label=t, style=style)
                 if show:
                     fig.show()
 

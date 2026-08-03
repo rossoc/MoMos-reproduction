@@ -4,15 +4,23 @@
 import pandas as pd
 import wandb
 from src.view import Report, extract_columns, merge_dfs
-from src.view.weight_distribution import plot_weights_2d
 import ast
 import numpy as np
-import os
-from tqdm import tqdm, trange
+from tqdm import tqdm
 from collections import defaultdict
 
 project = "momos2d-remake"  # "momos-reproduction"
 api = wandb.Api()
+
+
+def momos_complexity(n, cap, s, q=32):
+    m = np.ceil(n / s)
+    k = np.maximum(1, np.floor(m * cap))
+    motif_complexity = k * s * q
+    mosaic_complexity = m * np.ceil(np.log2(k))
+    return motif_complexity + mosaic_complexity
+
+
 # %%
 
 # Project is specified by <entity/project-name>
@@ -58,6 +66,7 @@ for i, r in enumerate(runs_df.iterrows()):
         print(e)
 # %%
 momos2d_data = []
+n = 986634
 for r in momos2d_runs:
     try:
         summary = ast.literal_eval(r["summary"])
@@ -65,8 +74,11 @@ for r in momos2d_runs:
     except Exception as _:
         summary = r["summary"]
         config = r["config"]
-    name = "momos2d"
-    name += f" rows: {config['quantization']['rows']}"
+
+    rows = config["quantization"]["rows"]
+    cols = config["quantization"]["cols"]
+    cap = config["quantization"]["capacity"]
+    name = f"rows: {config['quantization']['rows']}"
     name += f" cols: {config['quantization']['cols']}"
     run_name = r["name"]
     momos2d_data.append(
@@ -78,9 +90,10 @@ for r in momos2d_runs:
             "train_acc": summary["train/acc"],
             "train_loss": summary["train/loss"],
             "test_acc": summary["test/acc"],
-            "rows": config["quantization"]["rows"],
-            "cols": config["quantization"]["cols"],
-            "capacity": config["quantization"]["capacity"],
+            "rows": rows,
+            "cols": cols,
+            "capacity": cap,
+            "ras": n * 32 / momos_complexity(n, cap, rows * cols),
         }
     )
 # %%
@@ -96,6 +109,11 @@ stats = (
 )
 stats = stats.sort_values(["name", "capacity"])
 
+stats_ras = (
+    momos2d_df.groupby(["name", "ras"])["test_acc"].agg(["mean", "std"]).reset_index()
+)
+stats_ras = stats_ras.sort_values(["name", "ras"])
+
 # 3. Create the dictionary mapping name to ([capacities], [means], [stds])
 result_dict = (
     stats.groupby("name")
@@ -109,8 +127,28 @@ result_dict = (
     .to_dict()
 )
 
+result_dict_ras = (
+    stats_ras.groupby("name")
+    .apply(
+        lambda x: (
+            np.array(x["ras"].tolist()),
+            np.array(x["mean"].tolist()),
+            np.array(x["std"].tolist()),
+        )
+    )
+    .to_dict()
+)
+
 # %%
-fig = report.new_figure()
+fig = report.new_figure(fontsize=15)
+
+fig.axhline(
+    data={"Baseline": 0.564},
+    linestyle="--",
+    color="black",
+)
+
+
 fig.plot_with_var(
     result_dict,
     "",
@@ -120,6 +158,28 @@ fig.plot_with_var(
     logx=True,
 )
 # fig.show()
+# %%
+fig_ras = report.new_figure()
+
+fig_ras.axhline(
+    data={"Baseline": 0.564},
+    linestyle="--",
+    color="black",
+)
+
+fig_ras.plot_with_var(
+    result_dict_ras,
+    "",
+    symbol="o-",
+    x_label="CR",
+    y_label="Validation Accuracy",
+)
+fig_ras.show()
+
+
+# %%
+report.save("momos2d_brief.pdf")
+
 # %%
 hyperparams = ["rows", "cols", "capacity"]
 detail_params = pd.DataFrame({"rows": [2, 2, 2, 1], "cols": [1, 2, 4, 8]})
@@ -182,22 +242,29 @@ for run in tqdm(detail_runs):
 # %%
 runs_summary = {}
 for r in grouped_runs.to_dict("records"):
-    metrics = defaultdict(list)
+    metrics_by_epoch = defaultdict(lambda: defaultdict(list))
     for run in momos2d_best_runs_data:
         if run["name"] in r["run_name"]:
             for metric in MOMOS2D_METRICS:
-                if metric not in metrics:
-                    metrics[metric] = []
-                values = np.array(run["metrics"][metric])[:-1]
-                metrics[metric] += [values]
+                if metric in run["metrics"].columns:
+                    clean_df = run["metrics"][["epoch", metric]].dropna()
+                    for epoch, val in zip(clean_df["epoch"], clean_df[metric]):
+                        metrics_by_epoch[metric][round(epoch, 4)].append(val)
 
     result = {}
-    for k, v in metrics.items():
-        max_len = max(len(run) for run in v)
-        v = [np.append(run, [np.nan] * (max_len - len(run))) for run in v]
-        mean = np.nanmean(v, axis=0)
-        std = np.nanstd(v, axis=0)
-        result[k] = (mean, std)
+    for metric in MOMOS2D_METRICS:
+        if metric in metrics_by_epoch and metrics_by_epoch[metric]:
+            epoch_dict = metrics_by_epoch[metric]
+            sorted_epochs = sorted(epoch_dict.keys())
+            means = []
+            stds = []
+            for epoch in sorted_epochs:
+                vals = epoch_dict[epoch]
+                means.append(np.mean(vals))
+                stds.append(np.std(vals) if len(vals) > 1 else 0.0)
+            result[metric] = (np.array(sorted_epochs), np.array(means), np.array(stds))
+        else:
+            result[metric] = (np.array([]), np.array([]), np.array([]))
 
     runs_summary[f"rows: {r['rows']} cols: {r['cols']} cap: {r['capacity']}"] = result
 # %%

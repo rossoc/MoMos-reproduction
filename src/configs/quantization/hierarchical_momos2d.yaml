@@ -3,7 +3,7 @@ method: hierarchical_momos2d
 
 # Fraction of total epochs after which the secondary (higher) pass kicks in.
 # E.g. 0.5 means the second half of training applies primary + secondary.
-switch_fraction: 0.5
+switch_fraction: 0.0
 
 primary:
   rows: null
