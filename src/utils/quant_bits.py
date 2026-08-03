@@ -5,7 +5,6 @@ ratio for dense models, QAT, MoMos2D, and Hierarchical (v-fold) MoMos2D.
 """
 
 import math
-import torch
 import torch.nn as nn
 from quantizers.block_utils import iter_trainable_params
 
@@ -15,7 +14,9 @@ def count_trainable_parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in iter_trainable_params(model))
 
 
-def compute_quantization_bits(model: nn.Module, quant_cfg: dict | None) -> dict[str, float]:
+def compute_quantization_bits(
+    model: nn.Module, quant_cfg: dict | None
+) -> dict[str, float]:
     """Compute theoretical storage in bits and compression rate for a model.
 
     Args:
@@ -102,7 +103,9 @@ def compute_quantization_bits(model: nn.Module, quant_cfg: dict | None) -> dict[
         secondary = quant_cfg.get("secondary", {})
 
         s1 = int(primary.get("rows", 1)) * int(primary.get("cols", 1))
-        n_blocks1 = sum((p.numel() + s1 - 1) // s1 for p in iter_trainable_params(model))
+        n_blocks1 = sum(
+            (p.numel() + s1 - 1) // s1 for p in iter_trainable_params(model)
+        )
 
         if primary.get("k") is not None:
             k1 = int(primary["k"])

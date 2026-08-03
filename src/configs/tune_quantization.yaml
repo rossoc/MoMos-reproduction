@@ -5,7 +5,7 @@ defaults:
   - override hydra/hydra_logging: disabled
   - override hydra/job_logging: disabled
 
-epochs: 20
+epochs: 100
 seed: 42
 fold: null
 data_dir: ./data
@@ -17,7 +17,8 @@ precision: null
 log_dir: ./outputs
 prefix: tune_quantization
 
-evaluate_test: true
+evaluate_test: false
+save_init_ckpt: false
 
 # Default quantization placeholder
 quantization:
@@ -54,13 +55,12 @@ optuna:
 
   search_space:
     momos2d:
-      rows: [2, 4, 8, 16]
-      cols: [2, 4, 8, 16]
+      rows: [1, 2, 4, 8, 16]
+      cols: [1, 2, 4, 8, 16]
       capacity:
-        low: 0.001
+        low: 0.0001
         high: 0.5
         log: true
-      force_zero: [true]
 
     qat:
       q: [2, 4, 8, 16]
@@ -68,18 +68,16 @@ optuna:
     hierarchical_momos2d:
       switch_fraction: 0.0
       primary:
-        rows: [2, 4, 8]
-        cols: [2, 4, 8]
+        rows: [4, 8, 16, 32, 64]
+        cols: [4, 8]
         capacity:
-          low: 0.01
+          low: 0.0001
           high: 0.5
           log: true
-        force_zero: [true]
       secondary:
-        rows: [2, 4, 8]
-        cols: [2, 4, 8]
+        rows: [4, 8, 16, 32, 64]
+        cols: [4, 8, 16, 32, 64]
         capacity:
-          low: 0.05
-          high: 0.8
+          low: 0.0001
+          high: 0.5
           log: true
-        force_zero: [true]

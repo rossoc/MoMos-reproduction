@@ -5,11 +5,14 @@ from omegaconf import DictConfig, OmegaConf
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from coolname import generate_slug
+import torch.multiprocessing
 
 from data import ImageDataModule
 from model import LitClassifier, build_backbone
 from utils.init import resolve_runtime, setup_checkpoint_dir, configure_cuda_fast_path
 from utils.callbacks import build_callbacks
+
+torch.multiprocessing.set_sharing_strategy("file_system")
 
 
 def build_datamodule(cfg: DictConfig) -> ImageDataModule:
@@ -98,7 +101,7 @@ def run_training(cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule
         learning_rate=cfg.model.learning_rate,
         weight_decay=cfg.model.weight_decay,
         epochs=cfg.epochs,
-        save_init_path=init_ckpt_path,
+        save_init_path=init_ckpt_path if cfg.get("save_init_ckpt", True) else None,
         compile_model=compile_model,
     )
 
