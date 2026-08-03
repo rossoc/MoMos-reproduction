@@ -9,13 +9,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "causal-conv1d>=1.6.2.post1 ; sys_platform == 'linux'",
     "coolname>=4.2.0",
     "dotenv>=0.9.9",
     "hydra-core>=1.3.2",
     "ipykernel>=7.2.0",
     "lightning>=2.6.1",
-    "mamba-ssm>=2.3.2.post1 ; sys_platform == 'linux'",
     "matplotlib>=3.10.8",
     "numpy",
     "optuna>=4.0.0",
