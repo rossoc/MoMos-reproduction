@@ -12,7 +12,7 @@ import statistics
 import hydra
 import optuna
 from omegaconf import DictConfig, OmegaConf, open_dict
-from optuna.samplers import TPESampler
+from optuna.samplers import NSGAIISampler
 import torch
 
 from data import ImageDataModule
@@ -22,7 +22,11 @@ from utils.quant_bits import compute_quantization_bits
 
 
 def _suggest_block(trial: optuna.Trial, space: DictConfig, prefix: str) -> dict:
-    """Sample a rows/cols/capacity/force_zero block under `prefix_*` param names."""
+    """Sample a rows/cols/capacity block under `prefix_*` param names.
+
+    force_zero is always True (not part of the search space): a dedicated
+    zero motif must always be available so blocks can be pruned to zero.
+    """
     cap_spec = space.capacity
     return {
         "rows": int(trial.suggest_categorical(f"{prefix}_rows", list(space.rows))),
@@ -35,11 +39,13 @@ def _suggest_block(trial: optuna.Trial, space: DictConfig, prefix: str) -> dict:
                 log=bool(cap_spec.log),
             )
         ),
-        "force_zero": bool(trial.suggest_categorical(f"{prefix}_force_zero", list(space.force_zero))),
+        "force_zero": True,
     }
 
 
-def _suggest_quant_config(trial: optuna.Trial, search_space: DictConfig, methods: list[str]) -> dict:
+def _suggest_quant_config(
+    trial: optuna.Trial, search_space: DictConfig, methods: list[str]
+) -> dict:
     """Sample a quantization configuration from the search space."""
     method = trial.suggest_categorical("method", methods)
 
@@ -90,7 +96,9 @@ def _get_datamodule(cfg: DictConfig, fold: int, cache: dict) -> ImageDataModule:
     return cache[fold]
 
 
-def _objective_factory(cfg: DictConfig, backbone_sample: torch.nn.Module, dm_cache: dict):
+def _objective_factory(
+    cfg: DictConfig, backbone_sample: torch.nn.Module, dm_cache: dict
+):
     """Build the Optuna objective function."""
     opt_cfg = cfg.optuna
     search_space = opt_cfg.search_space
@@ -125,7 +133,9 @@ def _objective_factory(cfg: DictConfig, backbone_sample: torch.nn.Module, dm_cac
                 if not cfg.get("wandb", {}).get("enabled", False):
                     fold_cfg.wandb.enabled = False
                 else:
-                    fold_cfg.wandb.name = f"trial-{trial.number}_{quant_cfg['method']}_f{fold}"
+                    fold_cfg.wandb.name = (
+                        f"trial-{trial.number}_{quant_cfg['method']}_f{fold}"
+                    )
 
             try:
                 dm = _get_datamodule(cfg, fold, dm_cache)
@@ -167,7 +177,7 @@ def main(cfg: DictConfig):
         num_classes=cfg.dataset.num_classes,
     )
 
-    sampler = TPESampler(seed=int(opt_cfg.sampler.seed))
+    sampler = NSGAIISampler(seed=int(opt_cfg.sampler.seed))
 
     # Multi-objective study: Maximize Accuracy and Maximize Compression Rate
     study = optuna.create_study(
@@ -178,13 +188,13 @@ def main(cfg: DictConfig):
         load_if_exists=True,
     )
 
-    print(f"\n========================================================")
-    print(f" Starting Optuna Multi-Objective Quantization Search")
+    print("\n========================================================")
+    print(" Starting Optuna Multi-Objective Quantization Search")
     print(f" Study Name : {study_name}")
     print(f" Storage    : {storage_url}")
     print(f" Trials     : {opt_cfg.n_trials}")
-    print(f" Targets    : [Maximize Accuracy, Maximize Compression Rate]")
-    print(f"========================================================\n")
+    print(" Targets    : [Maximize Accuracy, Maximize Compression Rate]")
+    print("========================================================\n")
 
     # Cache of ImageDataModule per fold, shared across the search and the
     # Pareto K-fold verification phase below (dataset content only depends
@@ -202,24 +212,28 @@ def main(cfg: DictConfig):
 
     # Extract Pareto Front
     pareto_trials = study.best_trials
-    print(f"\n========================================================")
+    print("\n========================================================")
     print(f" PARETO FRONT SUMMARY ({len(pareto_trials)} Pareto-optimal trials)")
-    print(f"========================================================")
+    print("========================================================")
 
     pareto_summary = []
     for t in pareto_trials:
-        val_acc, comp_rate = t.values[0], t.values[1]
+        val_acc, comp_rate = t.values[0], t.values[1]  # type: ignore
         bpp = t.user_attrs.get("bpp", 0.0)
         method = t.user_attrs.get("method", "unknown")
-        print(f"Trial #{t.number:03d} | Method: {method:20s} | Val Acc: {val_acc:.4f} | Comp Rate: {comp_rate:.2f}x | BPP: {bpp:.2f}")
-        pareto_summary.append({
-            "trial_number": t.number,
-            "method": method,
-            "val_acc": float(val_acc),
-            "compression_rate": float(comp_rate),
-            "bpp": float(bpp),
-            "params": t.params,
-        })
+        print(
+            f"Trial #{t.number:03d} | Method: {method:20s} | Val Acc: {val_acc:.4f} | Comp Rate: {comp_rate:.2f}x | BPP: {bpp:.2f}"
+        )
+        pareto_summary.append(
+            {
+                "trial_number": t.number,
+                "method": method,
+                "val_acc": float(val_acc),
+                "compression_rate": float(comp_rate),
+                "bpp": float(bpp),
+                "params": t.params,
+            }
+        )
 
     pareto_yaml_path = os.path.join(storage_dir, f"{study_name}_pareto.yaml")
     with open(pareto_yaml_path, "w") as f:
@@ -230,19 +244,27 @@ def main(cfg: DictConfig):
     if opt_cfg.get("pareto_kfold_eval", False) and cfg.dataset.get("n_folds", 1) > 1:
         n_folds = int(cfg.dataset.n_folds)
         seeds = list(opt_cfg.get("pareto_seeds", [cfg.seed]))
-        print(f"\n========================================================")
-        print(f" Starting Pareto K-Fold Verification Across {n_folds} Folds & {len(seeds)} Seeds")
-        print(f"========================================================\n")
+        print("\n========================================================")
+        print(
+            f" Starting Pareto K-Fold Verification Across {n_folds} Folds & {len(seeds)} Seeds"
+        )
+        print("========================================================\n")
 
         pareto_kfold_results = []
         for t in pareto_trials:
             method = t.user_attrs.get("method", "unknown")
-            print(f"--- Evaluating Pareto Trial #{t.number} ({method}) across {n_folds} folds x {len(seeds)} seeds ---")
-            
+            print(
+                f"--- Evaluating Pareto Trial #{t.number} ({method}) across {n_folds} folds x {len(seeds)} seeds ---"
+            )
+
             # Reconstruct quant_cfg from trial params
             sample_space = opt_cfg.search_space
             dummy_trial = optuna.trial.FixedTrial(t.params)
-            quant_cfg = _suggest_quant_config(dummy_trial, sample_space, list(opt_cfg.methods))
+            quant_cfg = _suggest_quant_config(
+                dummy_trial,  # type: ignore
+                sample_space,
+                list(opt_cfg.methods),
+            )
 
             fold_accs = []
             for seed in seeds:
@@ -255,7 +277,9 @@ def main(cfg: DictConfig):
                         eval_cfg.prefix = f"{cfg.prefix}/pareto_eval/trial-{t.number}/seed-{seed}_fold-{fold_idx}"
 
                         if eval_cfg.get("wandb", {}).get("enabled", False):
-                            eval_cfg.wandb.name = f"pareto-t{t.number}_s{seed}_f{fold_idx}"
+                            eval_cfg.wandb.name = (
+                                f"pareto-t{t.number}_s{seed}_f{fold_idx}"
+                            )
 
                     dm = _get_datamodule(cfg, fold_idx, dm_cache)
                     res = run_training(eval_cfg, datamodule=dm)
@@ -264,20 +288,30 @@ def main(cfg: DictConfig):
             mean_acc = statistics.mean(fold_accs)
             std_acc = statistics.pstdev(fold_accs)
 
-            print(f"Trial #{t.number} ({method}) -> Overall K-Fold Val Acc: {mean_acc:.4f} ± {std_acc:.4f}")
-            pareto_kfold_results.append({
-                "trial_number": t.number,
-                "method": method,
-                "kfold_val_acc_mean": mean_acc,
-                "kfold_val_acc_std": std_acc,
-                "compression_rate": float(t.values[1]),
-                "bpp": float(t.user_attrs.get("bpp", 0.0)),
-                "params": t.params,
-            })
+            print(
+                f"Trial #{t.number} ({method}) -> Overall K-Fold Val Acc: {mean_acc:.4f} ± {std_acc:.4f}"
+            )
+            pareto_kfold_results.append(
+                {
+                    "trial_number": t.number,
+                    "method": method,
+                    "kfold_val_acc_mean": mean_acc,
+                    "kfold_val_acc_std": std_acc,
+                    "compression_rate": float(t.values[1]),  # type: ignore
+                    "bpp": float(t.user_attrs.get("bpp", 0.0)),
+                    "params": t.params,
+                }
+            )
 
         kfold_yaml_path = os.path.join(storage_dir, f"{study_name}_pareto_kfold.yaml")
         with open(kfold_yaml_path, "w") as f:
-            f.write(OmegaConf.to_yaml(OmegaConf.create({"pareto_kfold_verification": pareto_kfold_results})))
+            f.write(
+                OmegaConf.to_yaml(
+                    OmegaConf.create(
+                        {"pareto_kfold_verification": pareto_kfold_results}
+                    )
+                )
+            )
         print(f"\nPareto K-Fold verification results written to: {kfold_yaml_path}")
 
 
