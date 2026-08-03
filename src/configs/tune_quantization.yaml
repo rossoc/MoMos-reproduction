@@ -27,7 +27,7 @@ quantization:
 # Weights & Biases configuration
 wandb:
   enabled: true
-  project: momos-quantization-tune
+  project: mlp-tune-paretofront
   entity: null
   name: null
   group: ${optuna.study_name}
@@ -36,12 +36,12 @@ wandb:
 
 # Optuna configuration
 optuna:
-  study_name: quantization_pareto_search
+  study_name: mlp_paretofront
   storage_dir: ./outputs/optuna
   n_trials: 30
   eval_folds_search: [0]  # Fold(s) to evaluate during trial search
   pareto_kfold_eval: true # If true, re-evaluate Pareto-best configs on all K folds
-  pareto_seeds: [42, 43, 44] # Random seeds for Pareto-best verification
+  pareto_seeds: [85, 28, 57] # Random seeds for Pareto-best verification
   
   sampler:
     seed: 42
