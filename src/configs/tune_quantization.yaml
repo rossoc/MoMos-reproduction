@@ -55,24 +55,24 @@ optuna:
 
   search_space:
     momos2d:
-      rows: [1, 2, 4, 8, 16]
-      cols: [1, 2, 4, 8, 16]
+      rows: [1, 2, 4]
+      cols: [1, 2, 4]
       capacity:
-        low: 0.0001
-        high: 0.5
+        low: 0.00001
+        high: 0.001
         log: true
 
     qat:
-      q: [2, 4, 8, 16]
+      q: [32]
 
     hierarchical_momos2d:
       switch_fraction: 0.0
       primary:
-        rows: [4, 8, 16, 32, 64]
-        cols: [4, 8]
+        rows: [1, 2]
+        cols: [1, 2]
         capacity:
-          low: 0.0001
-          high: 0.5
+          low: 0.00001
+          high: 0.001
           log: true
       secondary:
         rows: [4, 8, 16, 32, 64]
