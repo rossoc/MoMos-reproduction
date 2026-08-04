@@ -28,7 +28,7 @@ quantization:
 # Weights & Biases configuration
 wandb:
   enabled: true
-  project: mlp-paretofront2
+  project: mlp-paretofront3
   entity: null
   name: null
   group: ${optuna.study_name}
@@ -37,7 +37,7 @@ wandb:
 
 # Optuna configuration
 optuna:
-  study_name: mlp_paretofront2
+  study_name: mlp_paretofront3
   storage_dir: ./outputs/optuna
   n_trials: 30
   eval_folds_search: [0]  # Fold(s) to evaluate during trial search
