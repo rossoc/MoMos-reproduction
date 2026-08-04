@@ -50,7 +50,7 @@ optuna:
   # Quantization methods to include in the Optuna search
   methods:
     - momos2d
-    - qat
+    # - qat
     - hierarchical_momos2d
 
   search_space:
