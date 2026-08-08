@@ -39,6 +39,3 @@ allow-direct-references = true
 dev = [
     "pytest>=9.0.3",
 ]
-
-[uv.tool]
-no-build-isolation-package = ["mamba-ssm", "causal-conv1d"]

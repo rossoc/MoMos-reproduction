@@ -80,24 +80,28 @@ def _suggest_quant_config(
         raise ValueError(f"Unsupported quantization method for sampling: {method}")
 
 
-def _get_datamodule(cfg: DictConfig, fold: int, cache: dict) -> ImageDataModule:
-    """Build (or reuse) the ImageDataModule for `fold`.
+def _build_datamodule(cfg: DictConfig, fold: int) -> ImageDataModule:
+    """Build a fresh ImageDataModule for `fold`.
 
-    Only fold varies across trials within one tune_quantization.py run, so a
-    single instance per fold can be shared across every trial/seed that uses
-    it, avoiding a full dataset reload each time. Not thread-safe — assumes
-    single-process `study.optimize` (n_jobs=1).
+    A brand-new instance is created on every call so each Optuna trial (and
+    each Pareto K-fold verification run) owns its own DataLoaders and
+    ``CombinedLoader`` state. Reusing a single instance across trials left a
+    stale ``_iterator=None`` ``CombinedLoader`` behind after Lightning's
+    teardown (``combined_loader.reset()``), which then raised
+    ``RuntimeError: Please call `iter(combined_loader)` first.`` on the
+    following trial. Building fresh per call sidesteps that shared-state
+    leak. The dataset content only depends on ``fold`` (not on
+    quantization/seed/prefix), so the reload cost is a single dataset
+    construction per distinct fold.
     """
-    if fold not in cache:
-        fold_cfg = copy.deepcopy(cfg)
-        with open_dict(fold_cfg):
-            fold_cfg.fold = int(fold)
-        cache[fold] = build_datamodule(fold_cfg)
-    return cache[fold]
+    fold_cfg = copy.deepcopy(cfg)
+    with open_dict(fold_cfg):
+        fold_cfg.fold = int(fold)
+    return build_datamodule(fold_cfg)
 
 
 def _objective_factory(
-    cfg: DictConfig, backbone_sample: torch.nn.Module, dm_cache: dict
+    cfg: DictConfig, backbone_sample: torch.nn.Module
 ):
     """Build the Optuna objective function."""
     opt_cfg = cfg.optuna
@@ -138,7 +142,7 @@ def _objective_factory(
                     )
 
             try:
-                dm = _get_datamodule(cfg, fold, dm_cache)
+                dm = _build_datamodule(cfg, fold)
                 res = run_training(fold_cfg, optuna_trial=trial, datamodule=dm)
                 val_accs.append(res["val_acc"])
             except optuna.TrialPruned:
@@ -196,12 +200,7 @@ def main(cfg: DictConfig):
     print(" Targets    : [Maximize Accuracy, Maximize Compression Rate]")
     print("========================================================\n")
 
-    # Cache of ImageDataModule per fold, shared across the search and the
-    # Pareto K-fold verification phase below (dataset content only depends
-    # on fold, not on quantization/seed/prefix).
-    dm_cache: dict = {}
-
-    objective = _objective_factory(cfg, backbone_sample, dm_cache)
+    objective = _objective_factory(cfg, backbone_sample)
     study.optimize(objective, n_trials=int(opt_cfg.n_trials), gc_after_trial=True)
 
     # Save full history to CSV
@@ -281,7 +280,7 @@ def main(cfg: DictConfig):
                                 f"pareto-t{t.number}_s{seed}_f{fold_idx}"
                             )
 
-                    dm = _get_datamodule(cfg, fold_idx, dm_cache)
+                    dm = _build_datamodule(cfg, fold_idx)
                     res = run_training(eval_cfg, datamodule=dm)
                     fold_accs.append(res["val_acc"])
 
