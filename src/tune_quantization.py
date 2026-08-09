@@ -7,6 +7,7 @@ Includes automated K-fold cross-validation verification for Pareto-optimal trial
 """
 
 import copy
+import gc
 import os
 import statistics
 import hydra
@@ -100,6 +101,37 @@ def _build_datamodule(cfg: DictConfig, fold: int) -> ImageDataModule:
     return build_datamodule(fold_cfg)
 
 
+def _bump_fd_limit(target: int = 65536) -> None:
+    """Raise the process open-file (RLIMIT_NOFILE) soft limit.
+
+    The multi-trial Optuna study spawns many DataLoader worker processes
+    across 25+ trials; combined with ``file_system`` tensor sharing and W&B,
+    the default soft limit (often 1024) is eventually exhausted -- ``errno 24,
+    Too many open files`` -- and the next worker spawn's ``os.pipe()`` fails.
+    This is a safety net; also raise the limit at launch (e.g.
+    ``ulimit -n 65536`` in the srun/sbatch wrapper).
+    """
+    try:
+        import resource
+    except ImportError:  # non-Unix platforms
+        return
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (ValueError, OSError) as exc:
+        print(f"[tune] could not read RLIMIT_NOFILE: {exc}")
+        return
+    new_soft = min(max(soft, target), hard) if hard > 0 else target
+    if new_soft <= soft:
+        return
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
+        print(
+            f"[tune] raised RLIMIT_NOFILE soft limit {soft} -> {new_soft} (hard {hard})"
+        )
+    except (ValueError, OSError) as exc:
+        print(f"[tune] could not raise RLIMIT_NOFILE to {new_soft}: {exc}")
+
+
 def _objective_factory(
     cfg: DictConfig, backbone_sample: torch.nn.Module
 ):
@@ -141,19 +173,34 @@ def _objective_factory(
                         f"trial-{trial.number}_{quant_cfg['method']}_f{fold}"
                     )
 
+            dm = None
+            res = None
+            val_acc = None
             try:
                 dm = _build_datamodule(cfg, fold)
                 res = run_training(fold_cfg, optuna_trial=trial, datamodule=dm)
-                val_accs.append(res["val_acc"])
+                val_acc = res["val_acc"]
             except optuna.TrialPruned:
                 raise
             except (RuntimeError, ValueError) as exc:
                 msg = str(exc).lower()
-                if "out of memory" in msg or "cuda" in msg:
+                if (
+                    "out of memory" in msg
+                    or "cuda" in msg
+                    or "too many open files" in msg
+                    or "errno 24" in msg
+                ):
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
                     raise optuna.TrialPruned() from exc
                 raise
+            finally:
+                # Release DataLoader workers / GPU refs promptly so open file
+                # descriptors don't accumulate across the long study
+                # (errno 24, "Too many open files").
+                del dm, res
+                gc.collect()
+            val_accs.append(val_acc)
 
         mean_val_acc = statistics.mean(val_accs) if val_accs else 0.0
         trial.set_user_attr("val_acc", mean_val_acc)
@@ -181,7 +228,21 @@ def main(cfg: DictConfig):
         num_classes=cfg.dataset.num_classes,
     )
 
-    sampler = NSGAIISampler(seed=int(opt_cfg.sampler.seed))
+    # Feasibility floor: trials below min_val_accuracy are marked infeasible
+    # and excluded from the Pareto front. This drops the degenerate
+    # ~random-guess points (CIFAR-10 -> 10% acc) that otherwise dominate only
+    # because of extreme compression, while keeping the full 2-D trade-off.
+    min_val_accuracy = float(opt_cfg.get("min_val_accuracy", 0.20))
+
+    def _constraints_func(trial: optuna.trial.FrozenTrial) -> list[float]:
+        acc = float(trial.user_attrs.get("val_acc", 0.0))
+        # constraint <= 0 means feasible; > 0 means infeasible
+        return [min_val_accuracy - acc]
+
+    sampler = NSGAIISampler(
+        seed=int(opt_cfg.sampler.seed),
+        constraints_func=_constraints_func,
+    )
 
     # Multi-objective study: Maximize Accuracy and Maximize Compression Rate
     study = optuna.create_study(
@@ -191,6 +252,7 @@ def main(cfg: DictConfig):
         sampler=sampler,
         load_if_exists=True,
     )
+    study.set_user_attr("min_val_accuracy", min_val_accuracy)
 
     print("\n========================================================")
     print(" Starting Optuna Multi-Objective Quantization Search")
@@ -199,6 +261,8 @@ def main(cfg: DictConfig):
     print(f" Trials     : {opt_cfg.n_trials}")
     print(" Targets    : [Maximize Accuracy, Maximize Compression Rate]")
     print("========================================================\n")
+
+    _bump_fd_limit()
 
     objective = _objective_factory(cfg, backbone_sample)
     study.optimize(objective, n_trials=int(opt_cfg.n_trials), gc_after_trial=True)

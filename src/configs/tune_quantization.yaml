@@ -47,6 +47,10 @@ optuna:
   sampler:
     seed: 42
 
+  # Pareto feasibility floor: trials with mean val_acc below this are marked
+  # infeasible and excluded from the front (drops ~random-guess points).
+  min_val_accuracy: 0.20
+
   # Quantization methods to include in the Optuna search
   methods:
     - momos2d
