@@ -1,3 +1,4 @@
 name: mlp
+optimizer: adamw
 learning_rate: 3e-4
 weight_decay: 1e-2

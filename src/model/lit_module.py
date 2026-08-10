@@ -27,9 +27,13 @@ class LitClassifier(L.LightningModule):
         backbone: The classifier network. Exposed as ``self.model`` so callbacks
             (e.g. quantization) can operate on it regardless of architecture.
         num_classes: Number of output classes (kept for metadata/hparams).
-        learning_rate: Initial learning rate for AdamW optimizer.
+        learning_rate: Initial learning rate.
         weight_decay: Weight decay (L2 regularization) factor.
         epochs: Number of epochs (for cosine LR scheduler).
+        optimizer: Optimizer family, ``"adamw"`` or ``"sgd"``. Different
+            architectures need different recipes (e.g. small CIFAR ResNets are
+            best trained with SGD+momentum, not AdamW).
+        momentum: Momentum factor, used only when ``optimizer="sgd"``.
         save_init_path: Optional path to save initial model weights.
         compile_model: If True, compile the backbone in place via
             ``nn.Module.compile`` (``torch.compile``). Done in place so
@@ -45,6 +49,8 @@ class LitClassifier(L.LightningModule):
         learning_rate: float = 3e-4,
         weight_decay: float = 1e-2,
         epochs: int = 200,
+        optimizer: str = "adamw",
+        momentum: float = 0.9,
         save_init_path: str | None = None,
         compile_model: bool = False,
     ):
@@ -112,12 +118,28 @@ class LitClassifier(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        """Configure AdamW optimizer with cosine LR scheduler."""
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.hparams.learning_rate,  # type: ignore
-            weight_decay=self.hparams.weight_decay,  # type: ignore
-        )
+        """Configure the optimizer (AdamW or SGD) with a cosine LR scheduler.
+
+        Optimizer family is picked per ``self.hparams.optimizer``, mirroring
+        the upstream ``saintslab/MoMos`` per-architecture profiles: small CIFAR
+        ResNets use SGD+momentum, while MLP/ViT-style backbones use AdamW.
+        """
+        name = str(getattr(self.hparams, "optimizer", "adamw")).lower()
+        if name == "sgd":
+            optimizer = torch.optim.SGD(
+                self.parameters(),
+                lr=self.hparams.learning_rate,  # type: ignore
+                momentum=self.hparams.momentum,  # type: ignore
+                weight_decay=self.hparams.weight_decay,  # type: ignore
+            )
+        elif name == "adamw":
+            optimizer = torch.optim.AdamW(
+                self.parameters(),
+                lr=self.hparams.learning_rate,  # type: ignore
+                weight_decay=self.hparams.weight_decay,  # type: ignore
+            )
+        else:
+            raise ValueError(f"Unsupported optimizer: {name!r}")
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,

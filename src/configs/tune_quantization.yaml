@@ -51,6 +51,8 @@ optuna:
   # infeasible and excluded from the front (drops ~random-guess points).
   min_val_accuracy: 0.20
 
+  reuse_completed_trials: true
+
   # Quantization methods to include in the Optuna search
   methods:
     - momos2d

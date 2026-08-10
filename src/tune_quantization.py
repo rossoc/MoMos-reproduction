@@ -132,9 +132,7 @@ def _bump_fd_limit(target: int = 65536) -> None:
         print(f"[tune] could not raise RLIMIT_NOFILE to {new_soft}: {exc}")
 
 
-def _objective_factory(
-    cfg: DictConfig, backbone_sample: torch.nn.Module
-):
+def _objective_factory(cfg: DictConfig, backbone_sample: torch.nn.Module):
     """Build the Optuna objective function."""
     opt_cfg = cfg.optuna
     search_space = opt_cfg.search_space
@@ -142,6 +140,20 @@ def _objective_factory(
 
     def objective(trial: optuna.Trial) -> tuple[float, float]:
         quant_cfg = _suggest_quant_config(trial, search_space, methods)
+
+        # --- Exact-parameter reuse -------------------------------------------------
+        # If a previously *completed* trial already evaluated this exact parameter
+        # set, reuse its stored accuracy + compression rate instead of re-training.
+        # This only runs in the search phase
+        if bool(opt_cfg.get("reuse_completed_trials", True)):
+            existing = trial.study.get_trials(states=[optuna.trial.TrialState.COMPLETE])
+            for past in existing:
+                if past.params == trial.params and past.values is not None:
+                    val_acc, comp_rate = float(past.values[0]), float(past.values[1])
+                    trial.set_user_attr("val_acc", val_acc)
+                    trial.set_user_attr("compression_rate", comp_rate)
+                    trial.set_user_attr("reused_trial", int(past.number))
+                    return val_acc, comp_rate
 
         # Theoretical bit calculation before full training
         bit_stats = compute_quantization_bits(backbone_sample, quant_cfg)
@@ -344,9 +356,19 @@ def main(cfg: DictConfig):
                                 f"pareto-t{t.number}_s{seed}_f{fold_idx}"
                             )
 
-                    dm = _build_datamodule(cfg, fold_idx)
-                    res = run_training(eval_cfg, datamodule=dm)
-                    fold_accs.append(res["val_acc"])
+                    dm = None
+                    res = None
+                    try:
+                        dm = _build_datamodule(cfg, fold_idx)
+                        res = run_training(eval_cfg, datamodule=dm)
+                        fold_accs.append(res["val_acc"])
+                    finally:
+                        # run_training now drops trainer/model/datamodule from its
+                        # return dict and GCs in its own finally; this extra
+                        # release keeps the per-(seed,fold) FD count flat so the
+                        # long Pareto loop doesn't accumulate workers either.
+                        del dm, res
+                        gc.collect()
 
             mean_acc = statistics.mean(fold_accs)
             std_acc = statistics.pstdev(fold_accs)

@@ -1,4 +1,6 @@
 name: resnet20
 img_size: 32               # CIFAR-10 native resolution; ResNet-20 is a 32x32 CIFAR model
-learning_rate: 3e-4
-weight_decay: 1e-2
+optimizer: sgd
+learning_rate: 0.1
+weight_decay: 1e-4
+momentum: 0.9

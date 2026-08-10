@@ -6,6 +6,7 @@ import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from coolname import generate_slug
 import torch.multiprocessing
+import gc
 
 from data import ImageDataModule
 from model import LitClassifier, build_backbone
@@ -101,6 +102,8 @@ def run_training(cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule
         learning_rate=cfg.model.learning_rate,
         weight_decay=cfg.model.weight_decay,
         epochs=cfg.epochs,
+        optimizer=str(cfg.model.get("optimizer", "adamw")),
+        momentum=float(cfg.model.get("momentum", 0.9)),
         save_init_path=init_ckpt_path if cfg.get("save_init_ckpt", True) else None,
         compile_model=compile_model,
     )
@@ -198,18 +201,26 @@ def run_training(cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule
             "val_loss": best_val_loss,
             "test_acc": test_acc,
             "test_loss": test_loss,
-            "best_model_path": checkpoint_callback.best_model_path if checkpoint_callback else None,
-            "model": model,
-            "datamodule": datamodule,
+            "best_model_path": checkpoint_callback.best_model_path
+            if checkpoint_callback
+            else None,
         }
     finally:
         if logger:
             try:
                 import wandb
+
                 if wandb.run is not None:
                     wandb.finish()
             except Exception:
                 pass
+        try:
+            del trainer
+        except NameError:
+            pass
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 @hydra.main(config_path="configs", config_name="config", version_base="1.3")
