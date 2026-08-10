@@ -256,12 +256,16 @@ def main(cfg: DictConfig):
         constraints_func=_constraints_func,
     )
 
-    # Multi-objective study: Maximize Accuracy and Maximize Compression Rate
+    # Multi-objective study: Maximize Accuracy and Maximize Compression Rate.
+    # Native Optuna pruning (trial.report/should_prune, optuna.pruners.*) is
+    # unsupported for multi-objective studies, so pruning is instead handled
+    # manually by OptunaMultiObjectiveEpochPruning     
     study = optuna.create_study(
         study_name=study_name,
         storage=storage_url,
         directions=["maximize", "maximize"],
         sampler=sampler,
+        pruner=optuna.pruners.NopPruner(),
         load_if_exists=True,
     )
     study.set_user_attr("min_val_accuracy", min_val_accuracy)

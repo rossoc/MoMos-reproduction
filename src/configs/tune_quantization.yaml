@@ -47,6 +47,14 @@ optuna:
   sampler:
     seed: 42
 
+  pruner:
+    enabled: true
+    monitor: val/acc
+    n_startup_trials: 5
+    n_warmup_steps: 10
+    percentile: 50.0
+    min_history: 5
+
   # Pareto feasibility floor: trials with mean val_acc below this are marked
   # infeasible and excluded from the front (drops ~random-guess points).
   min_val_accuracy: 0.20
