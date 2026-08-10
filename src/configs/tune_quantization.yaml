@@ -43,7 +43,7 @@ optuna:
   eval_folds_search: [0]  # Fold(s) to evaluate during trial search
   pareto_kfold_eval: true # If true, re-evaluate Pareto-best configs on all K folds
   pareto_seeds: [85, 28, 57] # Random seeds for Pareto-best verification
-  
+
   sampler:
     seed: 42
 
@@ -53,23 +53,22 @@ optuna:
 
   reuse_completed_trials: true
 
-  # Quantization methods to include in the Optuna search
   methods:
     - momos2d
-    # - qat
+    - qat
     - hierarchical_momos2d
 
   search_space:
     momos2d:
-      rows: [1, 2, 4]
+      rows: [1, 2]
       cols: [1, 2, 4]
       capacity:
-        low: 0.00001
-        high: 0.001
+        low: 0.0001
+        high: 0.03
         log: true
 
     qat:
-      q: [32]
+      q: [2, 4, 8, 16, 32]
 
     hierarchical_momos2d:
       switch_fraction: 0.0
@@ -77,13 +76,14 @@ optuna:
         rows: [1, 2]
         cols: [1, 2]
         capacity:
-          low: 0.00001
-          high: 0.001
-          log: true
-      secondary:
-        rows: [4, 8, 16, 32, 64]
-        cols: [4, 8, 16, 32, 64]
-        capacity:
           low: 0.0001
+          high: 0.03
+          log: true
+
+      secondary:
+        rows: [16, 32, 64]
+        cols: [16, 32, 64]
+        capacity:
+          low: 0.02
           high: 0.5
           log: true
