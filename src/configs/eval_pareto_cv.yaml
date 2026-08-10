@@ -1,0 +1,93 @@
+defaults:
+  - dataset: cifar10
+  - model: mlp
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+# Required: path to a Pareto-summary YAML written by tune_quantization.py
+# (top-level key `pareto_trials`, entries with trial_number/method/params/...).
+pareto_yaml: ???
+
+epochs: 100
+seed: 42  # unused directly -- each fold gets its own seed from cv.seeds below
+fold: null
+data_dir: ./data
+batch_size: 128
+accelerator: auto
+devices: 1
+precision: null
+
+log_dir: ./outputs
+prefix: pareto_cv
+
+evaluate_test: true
+save_init_ckpt: false
+
+# Where the aggregated CV+test results are written. Defaults to
+# <log_dir>/pareto_cv/<pareto_yaml stem>_cv_test.yaml when left null.
+output_yaml: null
+
+cv:
+  # index i -> training seed used for fold i. The fold *split* itself is
+  # deterministic (dataset.kfold_seed) and independent of these seeds --
+  # they only affect model init / data shuffling / augmentation for that
+  # fold's training run. Must have at least dataset.n_folds entries.
+  seeds: [42, 777, 50, 78, 291]
+  # Skip (config, fold) pairs already present in output_yaml instead of
+  # retraining them. Results are also written incrementally after every
+  # completed fold so an interrupted sweep can resume cleanly.
+  resume: true
+
+hydra:
+  output_subdir: null
+  run:
+    dir: ./outputs
+
+# Weights & Biases configuration
+wandb:
+  enabled: true
+  project: pareto-cv-verification
+  entity: null
+  name: null
+  tags: [pareto-cv]
+  log_model: false
+
+metrics: []
+all_compression_metrics_binarized: false
+
+# Self-contained copy of tune_quantization.yaml's optuna.search_space shape.
+# Needed only so `_suggest_quant_config` (reused from tune_quantization.py)
+# can reconstruct a full quantization config from a trial's `params` dict via
+# optuna.trial.FixedTrial. The numeric ranges are irrelevant here --
+# FixedTrial only *warns* (never raises) if a param value falls outside them
+# (see .venv .../optuna/trial/_fixed.py::_suggest) -- this block just needs
+# the right nested shape.
+quant_search_space:
+  momos2d:
+    rows: [1, 2, 4]
+    cols: [1, 2, 4]
+    capacity:
+      low: 0.00001
+      high: 0.001
+      log: true
+
+  qat:
+    q: [4, 8, 16, 32]
+
+  hierarchical_momos2d:
+    switch_fraction: 0.0
+    primary:
+      rows: [1, 2]
+      cols: [1, 2]
+      capacity:
+        low: 0.00001
+        high: 0.001
+        log: true
+    secondary:
+      rows: [4, 8, 16, 32, 64]
+      cols: [4, 8, 16, 32, 64]
+      capacity:
+        low: 0.0001
+        high: 0.5
+        log: true
