@@ -119,9 +119,33 @@ def run_training(cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule
     )
 
     if optuna_trial is not None:
-        from utils.optuna_callback import OptunaTrainEpochPruning
+        study = optuna_trial.study
+        is_multi_objective = len(study.directions) > 1 or getattr(
+            study, "_is_multi_objective", lambda: False
+        )()
 
-        callbacks.append(OptunaTrainEpochPruning(optuna_trial, monitor="val/acc"))
+        pruner_cfg = cfg.get("optuna", {}).get("pruner", {})
+        pruner_enabled = bool(pruner_cfg.get("enabled", True))
+
+        if is_multi_objective:
+            if pruner_enabled:
+                from utils.optuna_callback import OptunaMultiObjectiveEpochPruning
+
+                callbacks.append(
+                    OptunaMultiObjectiveEpochPruning(
+                        optuna_trial,
+                        monitor=str(pruner_cfg.get("monitor", "val/acc")),
+                        n_startup_trials=int(pruner_cfg.get("n_startup_trials", 5)),
+                        n_warmup_steps=int(pruner_cfg.get("n_warmup_steps", 3)),
+                        percentile=float(pruner_cfg.get("percentile", 50.0)),
+                        min_history=int(pruner_cfg.get("min_history", 3)),
+                    )
+                )
+            # else: pruning explicitly disabled via config — attach nothing.
+        else:
+            from utils.optuna_callback import OptunaTrainEpochPruning
+
+            callbacks.append(OptunaTrainEpochPruning(optuna_trial, monitor="val/acc"))
 
     # Extract checkpoint callback for later reference
     checkpoint_callback = next(
