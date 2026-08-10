@@ -31,11 +31,10 @@ from train import build_datamodule, run_training
 from tune_quantization import _bump_fd_limit, _suggest_quant_config
 from utils.quant_bits import compute_quantization_bits
 
-# _suggest_quant_config only needs this to build a CategoricalDistribution for
-# the (already-known) "method" value; FixedTrial never raises on a value
-# outside the choices, it only warns. Keep every method here so no config in
-# the input file trips that warning.
+# Real (non-baseline) methods `_suggest_quant_config` knows how to rebuild.
 _ALL_METHODS = ["momos2d", "qat", "hierarchical_momos2d"]
+
+_NO_QUANT_METHOD_NAMES = {None, "none", "None", "null", ""}
 
 
 def _params_key(params: dict) -> tuple:
@@ -71,15 +70,62 @@ def _dedupe_trials(trials: list[dict]) -> list[dict]:
     return list(grouped.values())
 
 
+def _ensure_categorical_choices(base_choices, value):
+    """Widen a categorical choice list so it's guaranteed to contain `value`.
+
+    Optuna's `FixedTrial` handles out-of-range `suggest_float` values by
+    only *warning* (range-checking happens after a lossless log/linear
+    transform) -- but `suggest_categorical` looks the fixed value up by
+    *index* in the choices list, which raises `ValueError` outright if it
+    isn't present. `cfg.quant_search_space`'s row/col/q lists are just a
+    static default, not a hard ceiling on what a real trial may have used,
+    so every categorical suggestion in `_suggest_quant_config` (method,
+    qat_q, momos2d_rows/cols, hm_p/hm_s rows/cols) needs its actual value
+    unioned in before reconstruction -- otherwise a config using a
+    row/col/q outside the configured defaults hard-fails instead of just
+    reconstructing correctly.
+    """
+    choices = list(base_choices)
+    return choices if value in choices else [value, *choices]
+
+
 def _reconstruct_quant_cfg(params: dict, search_space: DictConfig) -> dict:
     """Rebuild a full quantization config from a trial's flat `params` dict.
 
     Mirrors the Pareto K-fold verification phase already in
     `tune_quantization.py::main` (`optuna.trial.FixedTrial(t.params)` +
-    `_suggest_quant_config`), just lifted out into a standalone script.
+    `_suggest_quant_config`), just lifted out into a standalone script, plus
+    the "no quantization" baseline case tune_quantization.py never needed
+    (see `_NO_QUANT_METHOD_NAMES`) and the choice-widening in
+    `_ensure_categorical_choices`.
     """
+    method = params.get("method")
+    if method in _NO_QUANT_METHOD_NAMES:
+        return {"enabled": False, "method": None}
+
+    space = copy.deepcopy(search_space)
+    with open_dict(space):
+        if method == "momos2d":
+            space.momos2d.rows = _ensure_categorical_choices(space.momos2d.rows, params["momos2d_rows"])
+            space.momos2d.cols = _ensure_categorical_choices(space.momos2d.cols, params["momos2d_cols"])
+        elif method == "qat":
+            space.qat.q = _ensure_categorical_choices(space.qat.q, params["qat_q"])
+        elif method == "hierarchical_momos2d":
+            p, s = space.hierarchical_momos2d.primary, space.hierarchical_momos2d.secondary
+            p.rows = _ensure_categorical_choices(p.rows, params["hm_p_rows"])
+            p.cols = _ensure_categorical_choices(p.cols, params["hm_p_cols"])
+            s.rows = _ensure_categorical_choices(s.rows, params["hm_s_rows"])
+            s.cols = _ensure_categorical_choices(s.cols, params["hm_s_cols"])
+        else:
+            raise ValueError(
+                f"Unsupported quantization method in pareto entry params: {method!r} "
+                f"(expected one of {_ALL_METHODS} or a no-quantization marker "
+                f"{sorted({str(m) for m in _NO_QUANT_METHOD_NAMES})})"
+            )
+
     dummy_trial = optuna.trial.FixedTrial(dict(params))
-    return _suggest_quant_config(dummy_trial, search_space, _ALL_METHODS)
+    methods = _ensure_categorical_choices(_ALL_METHODS, method)
+    return _suggest_quant_config(dummy_trial, space, methods)
 
 
 def _run_fold(
@@ -232,7 +278,11 @@ def main(cfg: DictConfig) -> None:
     results: list[dict] = []
     for cfg_idx, trial in enumerate(unique_configs):
         params = dict(trial["params"])
-        method = str(params.get("method", trial.get("method", "unknown")))
+        # `.get(..., default)` only falls back when the key is *missing*, not
+        # when it's explicitly `null` -- a genuine no-quantization baseline
+        # entry (see _NO_QUANT_METHOD_NAMES) needs the `or` chain so it
+        # displays as "none" rather than the string "None".
+        method = str(params.get("method") or trial.get("method") or "none")
         trial_number = int(trial["trial_number"])
         key = _params_key(params)
 

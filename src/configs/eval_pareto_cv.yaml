@@ -56,13 +56,6 @@ wandb:
 metrics: []
 all_compression_metrics_binarized: false
 
-# Self-contained copy of tune_quantization.yaml's optuna.search_space shape.
-# Needed only so `_suggest_quant_config` (reused from tune_quantization.py)
-# can reconstruct a full quantization config from a trial's `params` dict via
-# optuna.trial.FixedTrial. The numeric ranges are irrelevant here --
-# FixedTrial only *warns* (never raises) if a param value falls outside them
-# (see .venv .../optuna/trial/_fixed.py::_suggest) -- this block just needs
-# the right nested shape.
 quant_search_space:
   momos2d:
     rows: [1, 2, 4]
