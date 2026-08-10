@@ -124,6 +124,7 @@ def run_training(cfg: DictConfig) -> float:
         dataset_name="structured_momos",
         prefix=cfg.prefix,
         run_name=run_name,
+        model_name=cfg.model.name,
     )
 
     has_logger = cfg.get("wandb", {}).get("enabled", False)

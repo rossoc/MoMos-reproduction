@@ -33,7 +33,7 @@ def generate_unique_run_name(base_dir, slug):
     return f"{run_number}_{slug}"
 
 
-def setup_checkpoint_dir(log_dir, dataset_name, prefix, run_name):
+def setup_checkpoint_dir(log_dir, dataset_name, prefix, run_name, model_name):
     """Plan the per-run directory layout and return paths.
 
     Layout:
@@ -47,10 +47,16 @@ def setup_checkpoint_dir(log_dir, dataset_name, prefix, run_name):
     "Checkpoint directory ... is not empty" warning that Lightning emits when
     ``init.ckpt`` already lives in its ``dirpath``.
 
+    Args:
+        model_name: Architecture name (e.g. ``cfg.model.name``), used to build
+            the fallback ``base_dir`` when ``prefix`` is unset — so outputs
+            for different architectures don't collide under the same
+            misleading directory name.
+
     Returns:
         Tuple of ``(checkpoint_dir, unique_run_name, init_ckpt_path)``.
     """
-    base_dir = prefix or f"{dataset_name}_mlp"
+    base_dir = prefix or f"{dataset_name}_{model_name}"
     run_base_dir = os.path.join(log_dir, base_dir)
     os.makedirs(run_base_dir, exist_ok=True)
     unique_run_name = generate_unique_run_name(run_base_dir, run_name)

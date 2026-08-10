@@ -77,6 +77,7 @@ def main(cfg: DictConfig):
         dataset_name="hypernet_regress",
         prefix=cfg.prefix,
         run_name=run_name,
+        model_name=cfg.model.name,
     )
 
     has_logger = cfg.get("wandb", {}).get("enabled", False)

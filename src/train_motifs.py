@@ -69,6 +69,7 @@ def main(cfg: DictConfig):
         dataset_name="motifs",
         prefix=cfg.prefix,
         run_name=run_name,
+        model_name=cfg.model.get("arch", "mlp"),
     )
 
     model = LitIndexToMotif(
