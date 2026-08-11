@@ -158,6 +158,8 @@ def _run_fold(
             "val_loss": res["val_loss"],
             "test_acc": res["test_acc"],
             "test_loss": res["test_loss"],
+            "metrics": res.get("metrics", {}),
+            "metrics_history": res.get("metrics_history", []),
         }
     except (RuntimeError, ValueError) as exc:
         msg = str(exc).lower()
@@ -178,6 +180,8 @@ def _run_fold(
                 "val_loss": None,
                 "test_acc": None,
                 "test_loss": None,
+                "metrics": {},
+                "metrics_history": [],
                 "error": str(exc),
             }
         raise
@@ -189,16 +193,34 @@ def _run_fold(
 
 
 def _aggregate(per_fold: list[dict]) -> dict:
-    def _stats(key: str) -> tuple[float | None, float | None]:
-        vals = [f[key] for f in per_fold if f.get(key) is not None]
+    def _stats(vals: list[float]) -> tuple[float | None, float | None]:
         if not vals:
             return None, None
         return statistics.mean(vals), statistics.pstdev(vals)
 
-    val_acc_mean, val_acc_std = _stats("val_acc")
-    val_loss_mean, val_loss_std = _stats("val_loss")
-    test_acc_mean, test_acc_std = _stats("test_acc")
-    test_loss_mean, test_loss_std = _stats("test_loss")
+    def _field_stats(key: str) -> tuple[float | None, float | None]:
+        return _stats([f[key] for f in per_fold if f.get(key) is not None])
+
+    val_acc_mean, val_acc_std = _field_stats("val_acc")
+    val_loss_mean, val_loss_std = _field_stats("val_loss")
+    test_acc_mean, test_acc_std = _field_stats("test_acc")
+    test_loss_mean, test_loss_std = _field_stats("test_loss")
+
+    # cfg.metrics is fixed for the whole script run, so every fold's
+    # `metrics` dict has the same keys -- union them anyway in case a fold
+    # was skipped (OOM) or resumed from an older run with a different
+    # cfg.metrics list.
+    metric_names = sorted({name for f in per_fold for name in f.get("metrics", {})})
+    cv_metrics_mean: dict[str, float | None] = {}
+    cv_metrics_std: dict[str, float | None] = {}
+    for name in metric_names:
+        vals = [
+            f["metrics"][name]
+            for f in per_fold
+            if f.get("metrics", {}).get(name) is not None
+        ]
+        cv_metrics_mean[name], cv_metrics_std[name] = _stats(vals)
+
     return {
         "cv_val_acc_mean": val_acc_mean,
         "cv_val_acc_std": val_acc_std,
@@ -208,6 +230,8 @@ def _aggregate(per_fold: list[dict]) -> dict:
         "cv_test_acc_std": test_acc_std,
         "cv_test_loss_mean": test_loss_mean,
         "cv_test_loss_std": test_loss_std,
+        "cv_metrics_mean": cv_metrics_mean,
+        "cv_metrics_std": cv_metrics_std,
         "n_folds_completed": sum(1 for f in per_fold if f.get("val_acc") is not None),
     }
 
@@ -351,6 +375,14 @@ def main(cfg: DictConfig) -> None:
             )
         else:
             print("    -> no completed folds")
+        if entry["cv_metrics_mean"]:
+            metrics_str = " | ".join(
+                f"{name}={mean:.4f}+/-{entry['cv_metrics_std'][name]:.4f}"
+                if mean is not None
+                else f"{name}=n/a"
+                for name, mean in entry["cv_metrics_mean"].items()
+            )
+            print(f"    -> {metrics_str}")
 
     print("\n========================================================")
     print(f" PARETO CV+TEST SUMMARY ({len(results)} configurations)")

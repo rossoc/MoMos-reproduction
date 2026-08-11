@@ -11,7 +11,11 @@ import gc
 from data import ImageDataModule
 from model import LitClassifier, build_backbone
 from utils.init import resolve_runtime, setup_checkpoint_dir, configure_cuda_fast_path
-from utils.callbacks import build_callbacks
+from utils.callbacks import (
+    build_callbacks,
+    QuantizationCallback,
+    MetricsHistoryCallback,
+)
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 
@@ -40,7 +44,9 @@ def build_datamodule(cfg: DictConfig) -> ImageDataModule:
     )
 
 
-def run_training(cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule | None = None) -> dict:
+def run_training(
+    cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule | None = None
+) -> dict:
     """Run training with PyTorch Lightning and Hydra config management.
 
     Args:
@@ -120,9 +126,10 @@ def run_training(cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule
 
     if optuna_trial is not None:
         study = optuna_trial.study
-        is_multi_objective = len(study.directions) > 1 or getattr(
-            study, "_is_multi_objective", lambda: False
-        )()
+        is_multi_objective = (
+            len(study.directions) > 1
+            or getattr(study, "_is_multi_objective", lambda: False)()
+        )
 
         pruner_cfg = cfg.get("optuna", {}).get("pruner", {})
         pruner_enabled = bool(pruner_cfg.get("enabled", True))
@@ -151,6 +158,14 @@ def run_training(cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule
     checkpoint_callback = next(
         (cb for cb in callbacks if isinstance(cb, L.pytorch.callbacks.ModelCheckpoint)),
         None,
+    )
+    quant_callback = next(
+        (cb for cb in callbacks if isinstance(cb, QuantizationCallback)), None
+    )
+    # Per-epoch metrics/* trajectory (see MetricsHistoryCallback); present
+    # whenever cfg.metrics is set, independent of quant_callback.
+    metrics_history_callback = next(
+        (cb for cb in callbacks if isinstance(cb, MetricsHistoryCallback)), None
     )
 
     # Setup W&B logger (if enabled)
@@ -203,14 +218,18 @@ def run_training(cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule
             best_val_loss = float(checkpoint_callback.best_model_score or float("inf"))
             print(f"Best validation loss: {best_val_loss:.4f}")
             val_results = trainer.validate(
-                model, datamodule=datamodule, ckpt_path=checkpoint_callback.best_model_path
+                model,
+                datamodule=datamodule,
+                ckpt_path=checkpoint_callback.best_model_path,
             )
             if val_results:
                 best_val_acc = float(val_results[0].get("val/acc", 0.0))
                 print(f"Best validation accuracy: {best_val_acc:.4f}")
         else:
             best_val_acc = float(trainer.callback_metrics.get("val/acc", 0.0))
-            best_val_loss = float(trainer.callback_metrics.get("val/loss", float("inf")))
+            best_val_loss = float(
+                trainer.callback_metrics.get("val/loss", float("inf"))
+            )
 
         # Final test evaluation
         test_results = None
@@ -219,13 +238,28 @@ def run_training(cfg: DictConfig, optuna_trial=None, datamodule: ImageDataModule
             test_results = trainer.test(model, datamodule=datamodule)
 
         test_acc = float(test_results[0].get("test/acc", 0.0)) if test_results else None
-        test_loss = float(test_results[0].get("test/loss", 0.0)) if test_results else None
+        test_loss = (
+            float(test_results[0].get("test/loss", 0.0)) if test_results else None
+        )
+
+        metrics = {}
+        metrics_history = []
+        if metrics_history_callback:
+            metrics = {
+                k: v
+                for k, v in metrics_history_callback.history[-1].items()
+                if k != "epoch"
+            }
+
+            metrics_history = metrics_history_callback.history
 
         return {
             "val_acc": best_val_acc,
             "val_loss": best_val_loss,
             "test_acc": test_acc,
             "test_loss": test_loss,
+            "metrics": metrics,
+            "metrics_history": metrics_history,
             "best_model_path": checkpoint_callback.best_model_path
             if checkpoint_callback
             else None,
@@ -256,4 +290,3 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     main()
-

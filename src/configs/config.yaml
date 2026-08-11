@@ -48,5 +48,5 @@ wandb:
   log_model: true
 
 # Metrics
-metrics: []  # e.g., [sparsity, l2, gzip, bz2, lzma, bdm]
+metrics: []  # e.g., [sparsity, l2, entropy, gzip, bz2, lzma, bdm, qbdm]
 all_compression_metrics_binarized: false

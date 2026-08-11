@@ -13,7 +13,7 @@ from omegaconf import OmegaConf
 
 from quantizers import quantize_qat, k_from_capacity, quantize
 from quantizers.block_utils import iter_trainable_params
-from utils.metrics import compute_metrics
+from utils.metrics import compute_metrics, resolve_block_shape
 
 
 # Keys returned by ``quantize`` that are not scalar metrics to log under quant/.
@@ -236,17 +236,7 @@ class QuantizationCallback(L.Callback):
 
         model = pl_module.model
         try:
-            if self.method == "hierarchical_momos2d":
-                active = (
-                    self.quant_cfg["secondary"]
-                    if self.quant_cfg.get("apply_secondary", False)
-                    else self.quant_cfg["primary"]
-                )
-                rows = int(active.get("rows") or 1)
-                cols = int(active.get("cols") or 1)
-            else:
-                rows = int(self.quant_cfg.get("rows") or 1)
-                cols = int(self.quant_cfg.get("cols") or 1)
+            rows, cols = resolve_block_shape(self.method, self.quant_cfg)
             metrics = compute_metrics(
                 model,
                 self.metric_names,
@@ -261,6 +251,83 @@ class QuantizationCallback(L.Callback):
                     )
         except Exception as e:
             print(f"Warning: Failed to compute metrics: {e}")
+
+
+class MetricsHistoryCallback(L.Callback):
+    """Records `utils.metrics.compute_metrics` results once per training epoch.
+
+    `QuantizationCallback.on_validation_epoch_end` already logs the *latest*
+    `metrics/*` values to `pl_module.log` (visible in wandb / a single
+    snapshot in `trainer.callback_metrics`), but two things limit that for
+    inspecting how a metric evolves over training: it only runs when
+    `cfg.quantization.enabled` is true, and nothing keeps the full per-epoch
+    trajectory in memory for a caller to read back programmatically. This
+    callback is decoupled from `quantization.enabled` (so it also covers
+    unquantized/baseline runs) and appends every epoch's values to
+    `self.history`, which `run_training` surfaces as `metrics_history`.
+
+    Args:
+        metric_names: Metric names to compute each epoch (see
+            `utils.metrics.compute_metrics`'s registry).
+        compression_binarized: Passed through to `compute_metrics`.
+        quant_callback: The run's `QuantizationCallback`, if any -- reused
+            only so the block shape (`resolve_block_shape`) matches exactly
+            what quantization is actually using (e.g. a hierarchical
+            method's live primary/secondary switch). `rows=cols=1` when
+            `None` (no quantization, or a method with no block structure).
+    """
+
+    def __init__(
+        self,
+        metric_names: list[str] | None = None,
+        compression_binarized: bool = False,
+        quant_callback: "QuantizationCallback | None" = None,
+    ):
+        super().__init__()
+        self.metric_names = metric_names or []
+        self.compression_binarized = compression_binarized
+        self.quant_callback = quant_callback
+        self.history: list[dict] = []
+
+    def on_validation_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule):
+        if not self.metric_names:
+            return
+        # Skip the pre-training sanity-check validation and any standalone
+        # trainer.validate()/test() pass after fit (e.g. run_training's
+        # best-checkpoint reload) -- only real training epochs belong in the
+        # trajectory.
+        if trainer.sanity_checking or trainer.state.fn != TrainerFn.FITTING:
+            return
+
+        if self.quant_callback is not None:
+            rows, cols = resolve_block_shape(
+                self.quant_callback.method, self.quant_callback.quant_cfg
+            )
+        else:
+            rows, cols = 1, 1
+
+        try:
+            metrics = compute_metrics(
+                pl_module.model,
+                self.metric_names,
+                self.compression_binarized,
+                rows=rows,
+                cols=cols,
+            )
+        except Exception as e:
+            print(f"Warning: Failed to compute metrics history: {e}")
+            return
+
+        self.history.append({"epoch": int(trainer.current_epoch), **metrics})
+
+        # Log to wandb when no QuantizationCallback is present (it handles
+        # logging for quantized runs via its own on_validation_epoch_end).
+        if self.quant_callback is None:
+            for name, value in metrics.items():
+                if value is not None:
+                    pl_module.log(
+                        f"metrics/{name}", value, on_epoch=True, prog_bar=False
+                    )
 
 
 def _best_checkpoint(checkpoint_dir: str) -> ModelCheckpoint:
@@ -356,7 +423,21 @@ def build_callbacks(
         callbacks.append(es)
 
     quant_cfg = cfg.get("quantization", {})
+    quant_callback = None
     if quant_cfg.get("enabled", False):
-        callbacks.append(_build_quantization_callback(cfg, quant_cfg))
+        quant_callback = _build_quantization_callback(cfg, quant_cfg)
+        callbacks.append(quant_callback)
+
+    # Built whenever cfg.metrics is set, regardless of quantization.enabled,
+    # so unquantized/baseline runs get a metrics trajectory too -- see
+    # MetricsHistoryCallback's docstring.
+    if cfg.get("metrics"):
+        callbacks.append(
+            MetricsHistoryCallback(
+                metric_names=cfg.get("metrics", []),
+                compression_binarized=cfg.get("all_compression_metrics_binarized", False),
+                quant_callback=quant_callback,
+            )
+        )
 
     return callbacks
