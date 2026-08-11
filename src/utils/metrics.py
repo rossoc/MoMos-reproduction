@@ -156,6 +156,11 @@ def resolve_block_shape(method, quant_cfg):
             else quant_cfg.get("primary") or {}
         )
         return int(active.get("rows") or 1), int(active.get("cols") or 1)
+    if method == "fold_momos":
+        # fold_momos never changes block geometry -- only the codebook -- so the
+        # primary block shape is always the one in effect.
+        primary = quant_cfg.get("primary") or {}
+        return int(primary.get("rows") or 1), int(primary.get("cols") or 1)
     return int(quant_cfg.get("rows") or 1), int(quant_cfg.get("cols") or 1)
 
 

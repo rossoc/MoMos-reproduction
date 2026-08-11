@@ -140,6 +140,49 @@ def compute_quantization_bits(
             "mosaic_bits": mosaic_bits,
         }
 
+    elif method == "fold_momos":
+        primary = quant_cfg.get("primary", {})
+        secondary = quant_cfg.get("secondary", {})
+
+        s1 = int(primary.get("rows", 1)) * int(primary.get("cols", 1))
+        n_blocks1 = sum(
+            (p.numel() + s1 - 1) // s1 for p in iter_trainable_params(model)
+        )
+
+        if primary.get("k") is not None:
+            k1 = int(primary["k"])
+        elif primary.get("capacity") is not None:
+            c1 = float(primary["capacity"])
+            k1 = max(1, min(int(c1 * n_blocks1), n_blocks1))
+        else:
+            raise ValueError("fold_momos primary requires 'k' or 'capacity'")
+
+        s2 = int(secondary.get("rows", 1)) * int(secondary.get("cols", 1))
+        n_big = math.ceil(n_blocks1 / s2)
+        c2 = float(secondary.get("capacity", 1.0))
+        k_per_bucket = max(1, min(int(round(k1 * c2)), n_big))
+        # fold_momos has no per-fold storage term (unlike hierarchical_momos2d's
+        # iota): reconstruction always references one shared, k-means-refined
+        # codebook. k_eff is an upper bound on that codebook's size -- the pooled
+        # k-means training set has at most s2 * k_per_bucket points (with
+        # repeats), and k-means never returns more centroids than k1 or that.
+        k_eff = max(1, min(k1, s2 * k_per_bucket))
+
+        motif_bits = float(k_eff * s1 * q_motifs)
+        idx_bits_per_block = math.ceil(math.log2(max(2, k_eff)))
+        index_bits = float(n_blocks1 * idx_bits_per_block)
+        compressed_bits = motif_bits + index_bits
+
+        return {
+            "num_parameters": n_params,
+            "dense_bits": dense_bits,
+            "compressed_bits": compressed_bits,
+            "compression_rate": dense_bits / max(1.0, compressed_bits),
+            "bpp": compressed_bits / max(1, n_params),
+            "motif_bits": motif_bits,
+            "index_bits": index_bits,
+        }
+
     else:
         return {
             "num_parameters": n_params,

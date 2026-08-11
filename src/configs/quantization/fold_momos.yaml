@@ -1,0 +1,40 @@
+enabled: true
+method: fold_momos
+
+# Fraction of total epochs after which the fold/k-means pass kicks in.
+# E.g. 0.5 means the second half of training applies primary + fold refinement.
+switch_fraction: 0.0
+
+primary:
+  rows: null
+  cols: null
+  k: null
+  capacity: null
+
+  force_zero: true
+
+  from_percentile: [0.5]
+  to_percentile: [0.99]
+  swapping_probability: null
+
+  chunk_size: 512
+  chunk_progress: false
+  chunk_progress_elements: null
+
+# secondary.rows/cols define the fold grid: sec_rows * sec_cols primary-motif
+# positions per big block, i.e. s' = rows * cols folds. capacity controls how
+# many motifs are sampled per fold to build the pooled k-means training set
+# (k_per_bucket = round(K_primary * capacity)) -- it is NOT a per-fold storage
+# cap; the refined codebook is shared, and every block may map to any of its
+# entries. If force_zero is true, the zero motif is seeded into every fold's
+# sample, and the refined centroid closest to zero is snapped to exact zero
+# after fitting.
+secondary:
+  rows: null
+  cols: null
+  capacity: null
+
+  force_zero: true
+
+  # Passed through to sklearn.cluster.KMeans(n_init=...).
+  kmeans_n_init: auto

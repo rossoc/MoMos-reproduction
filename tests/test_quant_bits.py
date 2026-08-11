@@ -78,3 +78,46 @@ def test_compute_quantization_bits_hierarchical():
     )
     assert res["compressed_bits"] > 0
     assert res["compression_rate"] > 1.0
+
+
+def test_compute_quantization_bits_fold_momos_matches_plain_momos2d_shape():
+    model = DummyModel()
+    # Primary: 4x4 = 16 size, 32 blocks. capacity 0.5 => k1 = 16 motifs.
+    # Secondary (fold) grid: 2x2 = 4 folds. n_big = ceil(32 / 4) = 8.
+    # Secondary capacity 0.5 => k_per_bucket = round(16 * 0.5) = 8, so the pooled
+    # k-means training set has up to 4 * 8 = 32 points -- more than k1=16, so the
+    # upper-bound k_eff clamps back down to k1=16 (unlike hierarchical, there is
+    # no separate iota term).
+    res = compute_quantization_bits(
+        model,
+        {
+            "enabled": True,
+            "method": "fold_momos",
+            "primary": {"rows": 4, "cols": 4, "capacity": 0.5},
+            "secondary": {"rows": 2, "cols": 2, "capacity": 0.5},
+            "q_bits": 32,
+        },
+    )
+    # Same formula shape as plain momos2d with k=k_eff=16 (no iota_bits/mosaic-only
+    # restriction term): motif_bits = 16*16*32 = 8192, index_bits = 32*ceil(log2(16))
+    # = 32*4 = 128.
+    assert res["motif_bits"] == 8192.0
+    assert res["index_bits"] == 128.0
+    assert res["compressed_bits"] == 8320.0
+    assert "iota_bits" not in res
+    assert res["compression_rate"] == (512 * 32) / 8320.0
+
+
+def test_compute_quantization_bits_fold_momos_requires_primary_k_or_capacity():
+    model = DummyModel()
+    with pytest.raises(ValueError):
+        compute_quantization_bits(
+            model,
+            {
+                "enabled": True,
+                "method": "fold_momos",
+                "primary": {"rows": 4, "cols": 4},
+                "secondary": {"rows": 2, "cols": 2, "capacity": 0.5},
+                "q_bits": 32,
+            },
+        )

@@ -45,6 +45,106 @@ def _per_param_grid(shape, rows, cols):
     return batch, R_p, C_p
 
 
+def _build_fold_grids(Z, M, layer_specs, rows, cols, sec_rows, sec_cols):
+    """Tile primary motif assignments into ``(sec_rows, sec_cols)`` fold positions.
+
+    Shared by ``_secondary_pass`` (restricted-subset hierarchical MoMos2D) and the
+    ``fold_momos`` k-means-refined codebook method: both need the same per-position
+    histogram of which primary motifs occur where, and the same big-block grid
+    layout to later reassign/reconstruct from.
+
+    Args:
+        Z: Primary motif dictionary, shape ``[K, s]``.
+        M: Primary mosaic (nearest motif id per block), shape ``[total_blocks]``.
+        layer_specs: Per-param specs from the primary pass.
+        rows, cols: Primary block shape.
+        sec_rows, sec_cols: Fold grid shape (primary-motif positions per big block
+            side); ``s_prime = sec_rows * sec_cols`` is the number of folds.
+
+    Returns:
+        Tuple ``(counts, grids, n_big_total)``:
+            counts: ``[s_prime, K]`` long tensor, per-fold histogram of primary
+                motif ids.
+            grids: list of ``(param, shape, batch, R_p, C_p, R_big, C_big, grid)``
+                tuples, one per param, for later reassignment.
+            n_big_total: total number of big blocks across all params.
+    """
+    s_prime = sec_rows * sec_cols
+    K = int(Z.shape[0])
+    device = Z.device
+
+    counts = torch.zeros(s_prime, K, dtype=torch.long, device=device)
+    grids = []
+    offset = 0
+    n_big_total = 0
+    pos_idx_cache = torch.arange(s_prime, device=device)
+    for param, n_blocks, _, shape in layer_specs:
+        batch, R_p, C_p = _per_param_grid(shape, rows, cols)
+        local = M[offset : offset + n_blocks].view(batch, R_p, C_p)
+        offset += n_blocks
+
+        local = F.pad(local, (0, (-C_p) % sec_cols, 0, (-R_p) % sec_rows), value=K)
+        R_big = local.shape[1] // sec_rows
+        C_big = local.shape[2] // sec_cols
+        grid = (
+            local.view(batch, R_big, sec_rows, C_big, sec_cols)
+            .permute(0, 1, 3, 2, 4)
+            .contiguous()
+        )
+
+        flat = grid.view(-1, s_prime)
+        combined = pos_idx_cache.expand_as(flat) * (K + 1) + flat
+        c = torch.bincount(combined.flatten(), minlength=s_prime * (K + 1))
+        counts += c.view(s_prime, K + 1)[:, :K]
+
+        grids.append((param, shape, batch, R_p, C_p, R_big, C_big, grid))
+        n_big_total += batch * R_big * C_big
+
+    return counts, grids, n_big_total
+
+
+def _sample_fold_ids(counts, k_per_bucket, force_zero, zero_idx):
+    """Weighted-random sample ``k_per_bucket`` primary motif ids per fold.
+
+    Sampling is without replacement, weighted by each fold's own frequency
+    histogram; if ``force_zero`` and ``zero_idx`` is given, the zero motif is
+    always included in every fold's sample. Shared by ``_secondary_pass`` (where
+    the sample directly becomes the fold's restricted "allowed" set) and
+    ``fold_momos`` (where every fold's sample is pooled and re-clustered).
+
+    Args:
+        counts: ``[s_prime, K]`` long tensor, per-fold motif histogram (see
+            ``_build_fold_grids``).
+        k_per_bucket: Number of ids to draw per fold.
+        force_zero: If True, always include ``zero_idx`` in every fold's sample.
+        zero_idx: Index of the exact-zero primary motif, or None.
+
+    Returns:
+        List of length ``s_prime``, each a sorted LongTensor of sampled motif ids
+        (shorter than ``k_per_bucket`` if fewer motifs with positive count occur
+        at that fold).
+    """
+    s_prime = counts.shape[0]
+    device = counts.device
+    iotas = []
+    for i in range(s_prime):
+        c = counts[i].clone()
+        chosen = []
+        remaining = k_per_bucket
+        if force_zero and zero_idx is not None:
+            chosen.append(zero_idx)
+            c[zero_idx] = -1
+            remaining -= 1
+        if remaining > 0:
+            weights = c.clamp(min=0).float()
+            n = min(remaining, int((weights > 0).sum().item()))
+            if n > 0:
+                sampled = torch.multinomial(weights, n, replacement=False).tolist()
+                chosen.extend(sampled)
+        iotas.append(torch.tensor(sorted(chosen), dtype=torch.long, device=device))
+    return iotas
+
+
 def _secondary_pass(
     Z, M, layer_specs, rows, cols, sec_rows, sec_cols, capacity, force_zero
 ):
@@ -56,33 +156,9 @@ def _secondary_pass(
         zero_rows = (Z.abs().sum(dim=1) == 0).nonzero(as_tuple=True)[0]
         zero_idx = int(zero_rows[0].item()) if force_zero and len(zero_rows) else None
 
-        # Per-position counts of primary motifs across all big blocks.
-        counts = torch.zeros(s_prime, K, dtype=torch.long, device=device)
-        grids = []
-        offset = 0
-        n_big_total = 0
-        pos_idx_cache = torch.arange(s_prime, device=device)
-        for param, n_blocks, _, shape in layer_specs:
-            batch, R_p, C_p = _per_param_grid(shape, rows, cols)
-            local = M[offset : offset + n_blocks].view(batch, R_p, C_p)
-            offset += n_blocks
-
-            local = F.pad(local, (0, (-C_p) % sec_cols, 0, (-R_p) % sec_rows), value=K)
-            R_big = local.shape[1] // sec_rows
-            C_big = local.shape[2] // sec_cols
-            grid = (
-                local.view(batch, R_big, sec_rows, C_big, sec_cols)
-                .permute(0, 1, 3, 2, 4)
-                .contiguous()
-            )
-
-            flat = grid.view(-1, s_prime)
-            combined = pos_idx_cache.expand_as(flat) * (K + 1) + flat
-            c = torch.bincount(combined.flatten(), minlength=s_prime * (K + 1))
-            counts += c.view(s_prime, K + 1)[:, :K]
-
-            grids.append((param, shape, batch, R_p, C_p, R_big, C_big, grid))
-            n_big_total += batch * R_big * C_big
+        counts, grids, n_big_total = _build_fold_grids(
+            Z, M, layer_specs, rows, cols, sec_rows, sec_cols
+        )
 
         # k_per_bucket is the bucket size: number of allowed primary motifs kept
         # per position. capacity is relative to K_primary, so capacity=1 ⇒
@@ -92,22 +168,7 @@ def _secondary_pass(
         k_per_bucket = max(1, min(round(K * capacity), int(n_big_total)))
 
         # iota_i per position.
-        iotas = []
-        for i in range(s_prime):
-            c = counts[i].clone()
-            chosen = []
-            remaining = k_per_bucket
-            if force_zero and zero_idx is not None:
-                chosen.append(zero_idx)
-                c[zero_idx] = -1
-                remaining -= 1
-            if remaining > 0:
-                weights = c.clamp(min=0).float()
-                n = min(remaining, int((weights > 0).sum().item()))
-                if n > 0:
-                    sampled = torch.multinomial(weights, n, replacement=False).tolist()
-                    chosen.extend(sampled)
-            iotas.append(torch.tensor(sorted(chosen), dtype=torch.long, device=device))
+        iotas = _sample_fold_ids(counts, k_per_bucket, force_zero, zero_idx)
 
         # Nearest allowed motif per position, precomputed as (s_prime, K+1).
         D = torch.cdist(Z, Z, p=2) ** 2

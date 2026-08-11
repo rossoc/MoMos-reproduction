@@ -65,6 +65,44 @@ def blocks_to_tensor2D(blocks, original_shape, rows, cols):
     return out.reshape(original_shape)
 
 
+def _reconstruct_and_apply(layer_specs, all_blocks, quantized_blocks, rows, cols):
+    """Gather quantized blocks per layer, reshape, copy into params, and tally stats.
+
+    Shared reconstruction step for any {codebook, per-block index} quantizer:
+    un-blocks ``quantized_blocks`` back into each parameter's native shape, writes
+    it in place, and accumulates distortion/changed-weight counts against
+    ``all_blocks`` (which may be the true original blocks, as in ``momos2D``, or
+    an already-quantized reference, as when a later refinement pass compares
+    against a prior projection).
+
+    Args:
+        layer_specs: List of ``(param, n_blocks, n_params, shape)`` tuples, in the
+            same order ``all_blocks``/``quantized_blocks`` were concatenated.
+        all_blocks: Reference block matrix, shape ``[total_blocks, rows*cols]``.
+        quantized_blocks: New block matrix, same shape as ``all_blocks``.
+        rows, cols: Block shape.
+
+    Returns:
+        Tuple ``(distortion, changed_weights)``.
+    """
+    distortion = 0.0
+    changed_weights = 0
+    offset = 0
+    for param, n_blocks, n_params, shape in layer_specs:
+        next_offset = offset + n_blocks
+        orig_tensor = blocks_to_tensor2D(
+            all_blocks[offset:next_offset], shape, rows, cols
+        ).reshape(param.shape)
+        quant_tensor = blocks_to_tensor2D(
+            quantized_blocks[offset:next_offset], shape, rows, cols
+        ).reshape(param.shape)
+        distortion += (orig_tensor - quant_tensor).square().sum().item()
+        changed_weights += (orig_tensor != quant_tensor).sum().item()
+        param.data.copy_(quant_tensor)
+        offset = next_offset
+    return distortion, changed_weights
+
+
 def _get_model_blocks2D(model, rows, cols):
     """Iterates through params and converts them to blocks."""
     layer_specs = []
@@ -126,21 +164,9 @@ def momos2D(
         counts = torch.bincount(nearest, minlength=k_eff).to("cpu", dtype=torch.long)
         motif_counts[:k_eff] = counts
 
-        distortion = 0.0
-        changed_weights = 0
-        offset = 0
-        for param, n_blocks, n_params, shape in layer_specs:
-            next_offset = offset + n_blocks
-            orig_tensor = blocks_to_tensor2D(
-                all_blocks[offset:next_offset], shape, rows, cols
-            ).reshape(param.shape)
-            quant_tensor = blocks_to_tensor2D(
-                quantized_blocks[offset:next_offset], shape, rows, cols
-            ).reshape(param.shape)
-            distortion += (orig_tensor - quant_tensor).square().sum().item()
-            changed_weights += (orig_tensor != quant_tensor).sum().item()
-            param.data.copy_(quant_tensor)
-            offset = next_offset
+        distortion, changed_weights = _reconstruct_and_apply(
+            layer_specs, all_blocks, quantized_blocks, rows, cols
+        )
 
     return {
         "distortion": float(distortion),

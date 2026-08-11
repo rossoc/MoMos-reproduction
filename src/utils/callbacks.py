@@ -54,6 +54,29 @@ def _hierarchical_bit_estimate(n, k, s, s_prime, k_per_bucket, q):
     }
 
 
+def _fold_bit_estimate(n, k, s, q):
+    """Bit cost estimate for fold_momos: same shape as plain momos2d, since the
+    fold/k-means machinery only refines the shared codebook -- it does not add a
+    separate per-fold storage term (unlike hierarchical's iota).
+
+    motifs: k * s * q
+    mosaic: ceil(n / s) block indices, each ceil(log2 k) bits.
+
+    ``k`` here is an *upper bound* (min(primary.k, s' * k_per_bucket)): the real
+    k-means-refined codebook size is only known once the fold pass actually runs.
+    """
+    motif_bits = k * s * q
+    idx_bits = math.ceil(math.log2(max(2, k)))
+    n_blocks = math.ceil(n / s)
+    mosaic_bits = n_blocks * idx_bits
+    total = motif_bits + mosaic_bits
+    return {
+        "motif_bits": motif_bits,
+        "mosaic_bits": mosaic_bits,
+        "total_bits": total,
+    }
+
+
 class QuantizationCallback(L.Callback):
     """Callback that handles QAT setup and MoMos projection during training.
 
@@ -91,6 +114,10 @@ class QuantizationCallback(L.Callback):
         """Set up QAT parametrizations before training begins."""
         if self.method == "hierarchical_momos2d":
             self._log_hierarchical_bit_estimate(pl_module)
+            return
+
+        if self.method == "fold_momos":
+            self._log_fold_bit_estimate(pl_module)
             return
 
         if self.method != "qat":
@@ -159,6 +186,53 @@ class QuantizationCallback(L.Callback):
             except Exception:
                 pass
 
+    def _log_fold_bit_estimate(self, pl_module: L.LightningModule):
+        model = pl_module.model
+        primary = self.quant_cfg["primary"]
+        secondary = self.quant_cfg["secondary"]
+
+        s = int(primary["s"])
+        s_prime = int(secondary["s"])
+        q = int(self.quant_cfg.get("q_bits", 32))
+        c = float(secondary.get("capacity") or 1.0)
+
+        if primary.get("k") is None and primary.get("capacity") is not None:
+            primary["k"] = k_from_capacity(model, s, primary["capacity"])
+        k_primary = int(primary["k"])
+
+        n = sum(p.numel() for p in iter_trainable_params(model))
+        n_blocks = math.ceil(n / s)
+        k_per_bucket = max(1, min(int(round(k_primary * c)), n_blocks))
+        # Upper bound: the pooled k-means training set has at most
+        # s_prime * k_per_bucket points (with repeats), and k-means never
+        # returns more centroids than that or than k_primary.
+        k_est = max(1, min(k_primary, s_prime * k_per_bucket))
+
+        est = _fold_bit_estimate(n, k_est, s, q)
+        baseline = n * q
+        print(
+            f"Fold MoMos bit estimate (q={q}, n={n}, k<={k_est}, s={s}, "
+            f"s'={s_prime}, k_per_bucket={k_per_bucket}): "
+            f"motif={est['motif_bits']}, mosaic={est['mosaic_bits']}, "
+            f"total={est['total_bits']} "
+            f"({est['total_bits'] / baseline:.4%} of dense {baseline} bits)"
+        )
+
+        logger = getattr(pl_module, "logger", None)
+        if logger is not None and hasattr(logger, "log_hyperparams"):
+            try:
+                logger.log_hyperparams(
+                    {
+                        "bits/motif": est["motif_bits"],
+                        "bits/mosaic": est["mosaic_bits"],
+                        "bits/total": est["total_bits"],
+                        "bits/dense": baseline,
+                        "bits/ratio": est["total_bits"] / baseline,
+                    }
+                )
+            except Exception:
+                pass
+
     def on_validation_epoch_start(self, trainer: L.Trainer, pl_module: L.LightningModule):
         """Apply MoMos projection before validation runs.
 
@@ -173,6 +247,7 @@ class QuantizationCallback(L.Callback):
             "momos2d",
             "static_momos2d",
             "hierarchical_momos2d",
+            "fold_momos",
         ]:
             return
 
@@ -184,14 +259,14 @@ class QuantizationCallback(L.Callback):
 
         model = pl_module.model
 
-        if self.method == "hierarchical_momos2d":
+        if self.method in ("hierarchical_momos2d", "fold_momos"):
             switch_fraction = float(self.quant_cfg.get("switch_fraction", 0.5))
             max_epochs = max(1, int(trainer.max_epochs or 1))
             progress = trainer.current_epoch / max_epochs
             self.quant_cfg["apply_secondary"] = progress >= switch_fraction
 
             # Only primary uses k_from_capacity: secondary `capacity` is interpreted
-            # relative to K_primary inside the hierarchy module.
+            # relative to K_primary inside the hierarchy/fold module.
             primary = self.quant_cfg["primary"]
             if primary.get("k") is None and primary.get("capacity") is not None:
                 primary["k"] = k_from_capacity(
@@ -377,7 +452,7 @@ def _build_quantization_callback(cfg, quant_cfg) -> QuantizationCallback:
         if full.get("k") is None and full.get("capacity") is None:
             raise ValueError(f"{method} requires either k or capacity in config")
 
-    if method == "hierarchical_momos2d":
+    if method in ("hierarchical_momos2d", "fold_momos"):
         for sub_key in ("primary", "secondary"):
             sub = full.get(sub_key)
             if not isinstance(sub, dict):
