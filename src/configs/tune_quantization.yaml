@@ -62,9 +62,11 @@ optuna:
   reuse_completed_trials: true
 
   methods:
+    - none
     - momos2d
     - qat
     - hierarchical_momos2d
+    - fold_momos
 
   search_space:
     momos2d:
@@ -79,6 +81,27 @@ optuna:
       q: [2, 4, 8, 16, 32]
 
     hierarchical_momos2d:
+      switch_fraction: 0.0
+      primary:
+        rows: [1, 2]
+        cols: [1, 2]
+        capacity:
+          low: 0.0001
+          high: 0.03
+          log: true
+
+      secondary:
+        rows: [16, 32, 64]
+        cols: [16, 32, 64]
+        capacity:
+          low: 0.02
+          high: 0.5
+          log: true
+
+    # secondary.capacity here sizes the per-fold k-means training pool
+    # (k_per_bucket = round(K_primary * capacity)), not a per-fold storage cap
+    # like hierarchical_momos2d's -- see src/quantizers/fold_momos.py.
+    fold_momos:
       switch_fraction: 0.0
       primary:
         rows: [1, 2]

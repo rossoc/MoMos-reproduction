@@ -1,7 +1,8 @@
 """Optuna multi-objective hyperparameter optimization for model quantization.
 
-Searches across quantization methods (MoMos2D, QAT, v-fold / Hierarchical MoMos2D)
-to construct the Pareto front maximizing Validation Accuracy and Compression Rate.
+Searches across quantization methods (dense/no quantization, MoMos2D, QAT, v-fold
+/ Hierarchical MoMos2D, Fold MoMos) to construct the Pareto front maximizing
+Validation Accuracy and Compression Rate.
 
 Includes automated K-fold cross-validation verification for Pareto-optimal trials.
 """
@@ -50,7 +51,18 @@ def _suggest_quant_config(
     """Sample a quantization configuration from the search space."""
     method = trial.suggest_categorical("method", methods)
 
-    if method == "momos2d":
+    if method == "none":
+        # Dense baseline: no quantization at all. compression_rate is exactly
+        # 1.0 (compute_quantization_bits' enabled=False fallback) and
+        # build_callbacks skips QuantizationCallback entirely, so this trains
+        # like a plain unquantized run -- an anchor point on the accuracy axis
+        # for the rest of the Pareto front to be compared against.
+        return {
+            "enabled": False,
+            "method": "none",
+        }
+
+    elif method == "momos2d":
         return {
             "enabled": True,
             "method": "momos2d",
@@ -75,6 +87,16 @@ def _suggest_quant_config(
             "switch_fraction": float(space.get("switch_fraction", 0.0)),
             "primary": _suggest_block(trial, space.primary, "hm_p"),
             "secondary": _suggest_block(trial, space.secondary, "hm_s"),
+        }
+
+    elif method == "fold_momos":
+        space = search_space.fold_momos
+        return {
+            "enabled": True,
+            "method": "fold_momos",
+            "switch_fraction": float(space.get("switch_fraction", 0.0)),
+            "primary": _suggest_block(trial, space.primary, "fm_p"),
+            "secondary": _suggest_block(trial, space.secondary, "fm_s"),
         }
 
     else:

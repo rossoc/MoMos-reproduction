@@ -36,5 +36,8 @@ secondary:
 
   force_zero: true
 
-  # Passed through to sklearn.cluster.KMeans(n_init=...).
+  # Passed through to sklearn.cluster.MiniBatchKMeans(n_init=..., max_iter=...).
+  # This pass reruns from scratch every validation epoch on a freshly-resampled
+  # primary dictionary, so a capped max_iter (not full convergence) is enough 
   kmeans_n_init: auto
+  kmeans_max_iter: 20

@@ -11,10 +11,20 @@ a block may use afterwards -- every block can map to any refined centroid. The
 per-fold sampling only shapes *which points feed the k-means fit* (a motif that is
 common across many folds gets pooled in repeatedly, which is what pulls the
 clustering toward it -- no explicit sample weighting is needed).
+
+Uses ``sklearn.cluster.MiniBatchKMeans`` rather than exact ``KMeans``: this pass
+reruns from scratch every validation epoch on a freshly-resampled primary
+dictionary (same "no convergence guarantee, heuristic projection" philosophy as
+the rest of MoMos -- see ``note/2026-06-15.md``), and at the wide end of the
+config space (many folds, large primary capacity) ``n_clusters`` can reach into
+the thousands -- exact Lloyd's KMeans scales roughly O(n_samples * n_clusters)
+per iteration and was measured at ~6 minutes for a single fit there (14790
+clusters, ~490k pooled points); MiniBatchKMeans with a capped ``max_iter`` cuts
+that to tens of seconds with no measurable quality loss for this use case.
 """
 
 import torch
-from sklearn.cluster import KMeans
+from sklearn.cluster import MiniBatchKMeans
 
 from .momos2d import quantize_momos2D, _reconstruct_and_apply
 from .momos_hierarchy import _build_fold_grids, _sample_fold_ids
@@ -45,6 +55,7 @@ def quantize_fold_momos(model, quant_cfg):
         capacity=float(secondary_cfg.get("capacity", 1.0)),
         force_zero=bool(secondary_cfg.get("force_zero", False)),
         n_init=secondary_cfg.get("kmeans_n_init", "auto"),
+        max_iter=int(secondary_cfg.get("kmeans_max_iter", 20)),
     )
     # Internal keys are for direct/test callers of _fold_kmeans_pass only -- keep
     # the public stats dict (logged by QuantizationCallback) scalar-only.
@@ -54,7 +65,17 @@ def quantize_fold_momos(model, quant_cfg):
 
 
 def _fold_kmeans_pass(
-    Z, M, layer_specs, rows, cols, sec_rows, sec_cols, capacity, force_zero, n_init
+    Z,
+    M,
+    layer_specs,
+    rows,
+    cols,
+    sec_rows,
+    sec_cols,
+    capacity,
+    force_zero,
+    n_init,
+    max_iter=20,
 ):
     K = int(Z.shape[0])
     device = Z.device
@@ -85,7 +106,16 @@ def _fold_kmeans_pass(
         else:
             pooled = Z[pooled_ids].detach().cpu().numpy()
             n_clusters = max(1, min(K, pooled.shape[0]))
-            km = KMeans(n_clusters=n_clusters, init="k-means++", n_init=n_init)
+            # batch_size >= n_clusters so each minibatch has a real chance of
+            # updating every cluster; capped at the pool size itself.
+            batch_size = max(1, min(pooled.shape[0], max(1024, n_clusters)))
+            km = MiniBatchKMeans(
+                n_clusters=n_clusters,
+                init="k-means++",
+                n_init=n_init,
+                max_iter=max_iter,
+                batch_size=batch_size,
+            )
             km.fit(pooled)
             Z_refined = torch.tensor(
                 km.cluster_centers_, device=device, dtype=dtype
