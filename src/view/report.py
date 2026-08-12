@@ -77,6 +77,10 @@ def report(filename, experiments, momos_data, group_by, momos_runs, show=True):
                 x_label="Epochs",
                 y1_label=name,
                 y2_label="Val. Loss",
+                # first column (i=0,2): drop the right y-axis label ("Val. Loss")
+                # second column (i=1,3): drop the left y-axis label (name)
+                show_y1_label=(i % 2 == 0),
+                show_y2_label=(i % 2 == 1),
             )
         figures.append(fig)
 
@@ -91,8 +95,18 @@ def report(filename, experiments, momos_data, group_by, momos_runs, show=True):
 
 
 class Report:
+    # Metrics that get divided by their own per-run max in metrics_vs_accuracy, so each
+    # stream is rescaled to peak at 1.0 - keyed by the underlying wandb metric string, so
+    # this applies automatically to any notebook's metrics_overview dict that uses one of
+    # these keys, without needing to be threaded through as a parameter.
+    _NORMALIZE_BY_MAX = {
+        "metrics/bdm_complexity",
+        "metrics/qbdm_complexity",
+        "metrics/weight_entropy",
+    }
+
     def __init__(self, output_dir="assets"):
-        self.figures = []
+        self.figures: list[Figure] = []
         self.output_dir = Path(output_dir)
 
     def new_figure(
@@ -107,18 +121,35 @@ class Report:
             for fig in self.figures:
                 fig.save(pdf=pdf)
 
-    def metrics_vs_accuracy(self, run_data, metrics, style="plain", show=False):
+    @staticmethod
+    def _normalize_stream(stream):
+        """Divide a metric's means (and stds, to keep the variance band consistent under the
+        rescaling: std(x/c) = std(x)/c) by the stream's own max, so it peaks at 1.0. `stream`
+        is either `(means, stds)` or `(x, means, stds)` - same shape in, same shape out."""
+        *rest, means, stds = stream
+        means = np.asarray(means, dtype=float)
+        stds = np.asarray(stds, dtype=float)
+        peak = means.max() if means.size else 0.0
+        peak = peak if peak else 1.0
+        return (*rest, means / peak, stds / peak)
+
+    def metrics_vs_accuracy(self, run_data, metrics, style="sci", show=False):
         for m, t in metrics.items():
             fig = self.new_figure(t + " vs Validation Loss", nrows=2, ncols=2)
+            y1_label = f"{t} (normalized)" if m in self._NORMALIZE_BY_MAX else t
 
+            i = 0  # tracks grid position; only advances on an actual plot (matches _next_plot)
             for sub_t, data in run_data.items():
                 if m not in data or "val/loss" not in data:
                     continue
                 if len(data[m][0]) == 0 or len(data["val/loss"][0]) == 0:
                     continue
-                if len(data[m]) == 3:
+                stream = data[m]
+                if m in self._NORMALIZE_BY_MAX:
+                    stream = self._normalize_stream(stream)
+                if len(stream) == 3:
                     d = (
-                        (data[m][0], data[m][1], data[m][2]),
+                        (stream[0], stream[1], stream[2]),
                         (
                             data["val/loss"][0],
                             data["val/loss"][1],
@@ -127,14 +158,25 @@ class Report:
                     )
                 else:
                     d = (
-                        (range(len(data[m][0])), data[m][0], data[m][1]),
+                        (range(len(stream[0])), stream[0], stream[1]),
                         (
                             range(len(data["val/loss"][0])),
                             data["val/loss"][0],
                             data["val/loss"][1],
                         ),
                     )
-                fig.plot_twinx_with_var(d, sub_t, y1_label=t, style=style)
+                fig.plot_twinx_with_var(
+                    d,
+                    sub_t,
+                    x_label="Epochs" if i > 1 else "",
+                    y1_label=y1_label,
+                    style=style,
+                    # first column (i=0,2): drop "Val. Loss" from the legend
+                    # second column (i=1,3): drop the metric name from the legend
+                    show_y1_legend=(i % 2 == 0),
+                    show_y2_legend=(i % 2 == 1),
+                )
+                i += 1
                 if show:
                     fig.show()
 
@@ -162,5 +204,5 @@ class Report:
         if show:
             fig.show()
 
-    def append_figures(self, figures):
+    def append_figures(self, figures: list):
         self.figures += figures

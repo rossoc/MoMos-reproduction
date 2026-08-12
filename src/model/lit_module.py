@@ -14,7 +14,7 @@ import torch.nn as nn
 import lightning as L
 
 from .mlp import MLP
-from quantizers.momos2d import tensor2D_to_blocks, blocks_to_tensor2D
+from src.quantizers.momos2d import tensor2D_to_blocks, blocks_to_tensor2D
 
 
 _MOTIF_FORMAT = "momos2d-motifs-v1"

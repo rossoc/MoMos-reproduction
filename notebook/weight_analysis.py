@@ -28,7 +28,6 @@ import os
 api = wandb.Api()
 runs = ["model-qcywyfqe"]
 _config_cache = {}
-dirs = []
 for run_name in runs:
     report = Report()
     rows = cols = cap = None
@@ -43,7 +42,11 @@ for run_name in runs:
         rows, cap = q_cfg["s"], q_cfg["capacity"]
         cols = 1
         d = artifact.download()
-        dirs += [d]
+        ckpt_path = os.path.join(d, "model.ckpt")
+        if os.path.exists(ckpt_path):
+            report.append_figures(plot_weights_2d(ckpt_path, rows, cols, i * 20))
+    if rows is not None:
+        report.save(f"momos2d_wa_r{rows}_c{cols}_cap{cap}.pdf")
 # %%
 rows = 1
 cols = 2
@@ -72,7 +75,7 @@ for run_name in runs:
             q_cfg = artifact.logged_by().config.get("quantization", {})
             _config_cache[run_name] = q_cfg
         q_cfg = _config_cache[run_name]
-        cols, rows, cap = q_cfg["rows"], q_cfg["cols"], q_cfg["capacity"]
+        rows, cols, cap = q_cfg["rows"], q_cfg["cols"], q_cfg["capacity"]
         d = artifact.download()
         ckpt_path = os.path.join(d, "model.ckpt")
         if os.path.exists(ckpt_path):

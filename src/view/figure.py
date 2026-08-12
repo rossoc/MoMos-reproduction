@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 from typing import Literal, Any
 from matplotlib import font_manager
+from matplotlib.legend import Legend
 import pandas as pd
-import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 
 _FONT = font_manager.FontProperties(fname="note/fonts/HKGrotesk-Regular.ttf")
@@ -35,7 +35,7 @@ _COLORS = [
 
 
 class Figure:
-    def __init__(self, title=None, figSize=(10, 7), ncols=1, nrows=1, fontsize=13):
+    def __init__(self, title=None, figSize=(10, 7), ncols=1, nrows=1, fontsize=12):
         self.figSize = figSize
         self.fontsize = fontsize
         self.ncols = ncols
@@ -80,28 +80,27 @@ class Figure:
         grid=True,
     ):
         ax = ax or self._ax()
-        ax.set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
-        ax.set_ylabel(y_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax.set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize * 4)
+        ax.set_ylabel(y_label, fontproperties=_FONT, fontsize=self.fontsize * 4)
 
-        if limits is not None:
-            ax.ticklabel_format(
-                axis="both",
-                useMathText=True,
-                useOffset=True,
-                style=style,
-                scilimits=limits,
-            )
-        else:
-            ax.ticklabel_format(
-                axis="both", useMathText=True, useOffset=True, style=style
-            )
+        # scilimits defaults to (0, 0) - like plot3D/plot_twinx_with_var below - so
+        # style="sci" actually forces scientific notation on every magnitude; matplotlib's
+        # own default of (-5, 6) only kicks in for very large/small values and silently
+        # leaves normal-range data in plain notation regardless of `style`.
+        ax.ticklabel_format(
+            axis="both",
+            useMathText=True,
+            useOffset=True,
+            style=style,
+            scilimits=limits if limits is not None else (0, 0),
+        )
 
         if self.ncols == 1 and self.nrows == 1:
             self.fig.suptitle(
-                exp_name, fontproperties=_FONT, fontsize=self.fontsize * 1.5
+                exp_name, fontproperties=_FONT, fontsize=self.fontsize * 5
             )
         else:
-            ax.set_title(exp_name)
+            ax.set_title(exp_name, fontproperties=_FONT, fontsize=self.fontsize * 5)
 
         ax.grid(grid)
         if axis:
@@ -281,6 +280,8 @@ class Figure:
         pop_n=0,
         colors=_COLORS,
         grid=True,
+        show_y1_label=True,
+        show_y2_label=True,
     ):
         self._next_plot()
 
@@ -324,9 +325,11 @@ class Figure:
         )
 
         ax1.set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
-        ax1.set_ylabel(y1_label, fontproperties=_FONT, fontsize=self.fontsize)
+        if show_y1_label:
+            ax1.set_ylabel(y1_label, fontproperties=_FONT, fontsize=self.fontsize)
         ax1.ticklabel_format(axis="both", useMathText=True, useOffset=True, style=style)
-        ax2.set_ylabel(y2_label, fontproperties=_FONT, fontsize=self.fontsize)
+        if show_y2_label:
+            ax2.set_ylabel(y2_label, fontproperties=_FONT, fontsize=self.fontsize)
         ax2.ticklabel_format(axis="y", useMathText=True, useOffset=True, style=style)
 
         lines1, labels1 = ax1.get_legend_handles_labels()
@@ -347,11 +350,14 @@ class Figure:
         symbol="-",
         style: Literal["sci", "scientific", "plain"] = "plain",
         markersize=5,
+        linewidth=2.5,
         skip_n=0,
         pop_n=0,
         colors=_COLORS,
         alpha=0.12,
         grid=True,
+        show_y1_legend=True,
+        show_y2_legend=True,
     ):
         self._next_plot()
 
@@ -367,6 +373,7 @@ class Figure:
             points[1][skip_n : len(points[0]) - pop_n],
             symbol,
             markersize=markersize,
+            linewidth=linewidth,
             label=y1_label,
             color=colors[0],
         )
@@ -400,6 +407,7 @@ class Figure:
             points[1][skip_n : len(points[0]) - pop_n],
             symbol,
             markersize=markersize,
+            linewidth=linewidth,
             label=y2_label,
             color=colors[1],
         )
@@ -417,14 +425,66 @@ class Figure:
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
 
-        ax1.set_xlabel(x_label, fontproperties=_FONT, fontsize=self.fontsize)
-        ax1.set_ylabel(y1_label, fontproperties=_FONT, fontsize=self.fontsize)
-        ax1.ticklabel_format(axis="both", useMathText=True, useOffset=True, style=style)
-        ax2.set_ylabel(y2_label, fontproperties=_FONT, fontsize=self.fontsize)
-        ax2.ticklabel_format(axis="y", useMathText=True, useOffset=True, style=style)
+        ax1.set_xlabel(x_label, fontproperties=_FONT)
+        if show_y1_legend:
+            ax1.set_ylabel(y1_label, fontproperties=_FONT)
+        ax1.ticklabel_format(
+            axis="y", useMathText=True, useOffset=True, style=style, scilimits=(0, 0)
+        )
+        if show_y2_legend:
+            ax2.set_ylabel(y2_label, fontproperties=_FONT, fontsize=self.fontsize)
+        ax2.ticklabel_format(
+            axis="y", useMathText=True, useOffset=True, style=style, scilimits=(0, 0)
+        )
 
-        ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
+        legend_lines = (lines1 if show_y1_legend else []) + (
+            lines2 if show_y2_legend else []
+        )
+        legend_labels = (labels1 if show_y1_legend else []) + (
+            labels2 if show_y2_legend else []
+        )
+        ax1.legend(legend_lines, legend_labels, loc="upper right")
         ax2.legend([], [], title=exp_name, loc="lower left")
+
+    def _style_text(self, text, fontsize=None):
+        """Apply `_FONT` and a size to a Text object, in the order that actually sticks:
+        `set_fontproperties` resets size to the FontProperties' own default (10pt, since
+        `_FONT` doesn't specify one), so it must run *before* `set_fontsize`, not after."""
+        text.set_fontproperties(_FONT)
+        text.set_fontsize(self.fontsize if fontsize is None else fontsize)
+
+    def _enforce_fontsize(self):
+        """Force every piece of text on this figure - titles, axis labels, tick labels,
+        sci-notation offset text, and legends (entries + title) - to self.fontsize, so a
+        single knob rescales everything consistently. Walks `self.fig.axes` rather than the
+        `self.ax` grid so twin axes (from `twinx()`) are covered too."""
+        suptitle = getattr(self.fig, "_suptitle", None)
+        if suptitle is not None:
+            self._style_text(suptitle, fontsize=2 * self.fontsize)
+
+        for ax in self.fig.axes:
+            self._style_text(ax.title, fontsize=1.5 * self.fontsize)
+            self._style_text(ax.xaxis.label, fontsize=1.5 * self.fontsize)
+            self._style_text(ax.yaxis.label, fontsize=1.5 * self.fontsize)
+            ax.tick_params(axis="both", which="major", labelsize=self.fontsize)
+            ax.xaxis.get_offset_text().set_fontsize(self.fontsize)
+            ax.yaxis.get_offset_text().set_fontsize(self.fontsize)
+
+            # `ax.get_legend()` only returns the *most recently created* legend
+            # (`ax.legend_`); a second `ax.legend()` call replaces that reference
+            # even though the first legend is still drawn (kept alive via
+            # `ax.add_artist()` - the pattern used for e.g. a marker-shape legend
+            # plus a separate color legend on the same axes). Walk every `Legend`
+            # artist actually attached to the axes instead, so all of them end up
+            # at the same font size.
+            for legend in ax.get_children():
+                if not isinstance(legend, Legend):
+                    continue
+                for text in legend.get_texts():
+                    text.set_fontsize(self.fontsize)
+                title = legend.get_title()
+                if title is not None:
+                    title.set_fontsize(self.fontsize)
 
     def save(self, figure_name: str = "", pdf: PdfPages = None):
         """Save figure to PDF.
@@ -433,33 +493,20 @@ class Figure:
             figure_name: Filename for standalone save (used if pdf is None)
             pdf: PdfPages object to save to (used if figure_name is empty)
         """
-        if not hasattr(self, "ax_flat"):
-            if isinstance(self.ax, np.ndarray):
-                self.ax_flat = self.ax.flatten().tolist()
-            elif isinstance(self.ax, list):
-                self.ax_flat = self.ax
-            else:
-                self.ax_flat = [self.ax]
-
-        for ax in self.ax_flat:
-            ax.tick_params(axis="both", which="major", labelsize=self.fontsize)
+        self._enforce_fontsize()
+        for ax in self.fig.axes:
             for line in ax.get_lines():
                 line.set_rasterized(True)
-
-        fig = None
-        if hasattr(self, "fig") and self.fig is not None:
-            fig = self.fig
-        else:
-            fig = self.ax_flat[0].get_figure()
 
         self.fig.tight_layout()
 
         if pdf is not None:
             pdf.savefig(self.fig, bbox_inches="tight")
         else:
-            fig.savefig(f"{figure_name}.pdf", bbox_inches="tight")
+            self.fig.savefig(f"{figure_name}.pdf", bbox_inches="tight")
 
     def show(self):
+        self._enforce_fontsize()
         self.fig.tight_layout()
         self.fig.show()
 

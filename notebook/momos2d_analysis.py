@@ -24,21 +24,21 @@ def momos_complexity(n, cap, s, q=32):
 # %%
 
 # Project is specified by <entity/project-name>
-runs = api.runs(f"danesinoo-university-of-copenhagen/{project}")
-
-summary_list, config_list, name_list = [], [], []
-for run in tqdm(runs):
-    summary_list.append(run.summary._json_dict)
-    config_list.append({k: v for k, v in run.config.items() if not k.startswith("_")})
-
-    name_list.append(run.name)
-
-runs_df = pd.DataFrame(
-    {"summary": summary_list, "config": config_list, "name": name_list}
-)
-
-# %%
-runs_df.to_csv(f"{project}.csv")
+# runs = api.runs(f"danesinoo-university-of-copenhagen/{project}")
+#
+# summary_list, config_list, name_list = [], [], []
+# for run in tqdm(runs):
+#     summary_list.append(run.summary._json_dict)
+#     config_list.append({k: v for k, v in run.config.items() if not k.startswith("_")})
+#
+#     name_list.append(run.name)
+#
+# runs_df = pd.DataFrame(
+#     {"summary": summary_list, "config": config_list, "name": name_list}
+# )
+#
+# # %%
+# runs_df.to_csv(f"{project}.csv")
 runs_df = pd.read_csv(f"{project}.csv")
 
 
@@ -140,7 +140,7 @@ result_dict_ras = (
 )
 
 # %%
-fig = report.new_figure(fontsize=15)
+fig = report.new_figure()
 
 fig.axhline(
     data={"Baseline": 0.564},
@@ -171,14 +171,14 @@ fig_ras.plot_with_var(
     result_dict_ras,
     "",
     symbol="o-",
-    x_label="CR",
+    x_label="Compression Ratio",
     y_label="Validation Accuracy",
 )
-fig_ras.show()
+# fig_ras.show()
 
 
 # %%
-report.save("momos2d_brief.pdf")
+# report.save("momos2d_brief.pdf")
 
 # %%
 hyperparams = ["rows", "cols", "capacity"]
@@ -266,7 +266,7 @@ for r in grouped_runs.to_dict("records"):
         else:
             result[metric] = (np.array([]), np.array([]), np.array([]))
 
-    runs_summary[f"rows: {r['rows']} cols: {r['cols']} cap: {r['capacity']}"] = result
+    runs_summary[f"rows: {r['rows']} cols: {r['cols']}"] = result
 # %%
 tr_overview = {
     "val/acc": "Validation Accuracy",
@@ -274,19 +274,19 @@ tr_overview = {
     "train/acc": "Training Accuracy",
     "train/loss": "Training Loss",
 }
-report.training_overview(runs_summary, tr_overview, show=True)
+report.training_overview(runs_summary, tr_overview)
 # %%
 metrics_overview = {
-    "metrics/bdm_complexity": "BDM Complexity",
-    "metrics/gzip_compression_rate": "Gzip Compression Rate",
-    "metrics/bz2_compression_rate": "BZ2 Compression Rate",
-    "metrics/lzma_compression_rate": "LZMA Compression Rate",
-    "metrics/weight_l2": "Weight L2",
+    "metrics/bdm_complexity": r"$\mathcal{K}_\mathrm{BDM}$",
+    "metrics/gzip_compression_rate": r"$\mathcal{r}_{Gzip}$",
+    "metrics/bz2_compression_rate": r"$\mathcal{r}_\mathrm{BZ2}$",
+    "metrics/lzma_compression_rate": r"$\mathcal{r}_\mathrm{LZMA}$",
+    "metrics/weight_l2": r"$L_2$ Norm",
     "metrics/sparsity": "Sparsity",
-    "quant/distortion": "Quantization Distortion",
-    "quant/num_changed_weights": "Number of Changed Weights",
+    "quant/distortion": "Distortion",
+    "quant/num_changed_weights": "# Changed Weights",
 }
 
-report.metrics_vs_accuracy(runs_summary, metrics_overview, True)
+report.metrics_vs_accuracy(runs_summary, metrics_overview)
 # %%
 report.save("momos2_overview.pdf")
